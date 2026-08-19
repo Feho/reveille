@@ -479,6 +479,79 @@ machine. v1 proves the pipeline composes; the timed test gates shipping. Keep bu
 — the newcomer-first screen design, the four honest states, no jargon — because retrofitting
 those after a developer-shaped v1 is how launchers end up developer-shaped.
 
+### Review of Milestone 6 (from the Linux machine, 19 Aug 2026)
+
+**M6 is accepted against its stated bar.** Commit `d4812eb` adds the Tauri shell, the composed
+`journey` command, and the two fixes carried over from the Part B review. Both journeys were
+demonstrated end to end on the owner's Windows machine, which is what v1 asked for.
+
+**Both previously open items are genuinely closed.** `arguments_for` no longer slices by magic
+index — each dialect builds its own vector, so inserting an argument can no longer silently
+corrupt the retail form. `browse` now shows the compatibility state it computes: a per-row badge
+in text and the full `CompatibilityAssessment` per server in JSON, closing the M4 CLI-polish
+note.
+
+**Rotation dedup is correct and does not disturb the frozen measurements.** `preflight::check`
+now keys on `MapKey` and keeps the first spelling and position, so a rotation listing the same
+map twice needs it once. Entries that fail to normalise are never deduped, which is the safe
+direction. Dedup can only shrink a `count`; it can never flip a map between present and absent,
+so the 84/15/15 and 83/16/15 index-comparison figures stand unchanged.
+
+**Confirmed defect — ubuntu CI has been red since this commit.** `d4812eb` added
+`crates/reveille-app` to the workspace members, and CI ran `cargo test --workspace` on
+`ubuntu-latest` with no GTK or WebKit development packages, so `glib-sys`'s build script fails at
+`pkg-config --libs --cflags glib-2.0`. Run `32269538771`, the first failing run in the project's
+history. Reproduced locally: `cargo check -p reveille-app` on this aarch64 Linux machine fails
+the same way at `gdk-3.0`. The `windows-latest` leg of that run was **cancelled by the matrix's
+default `fail-fast`**, not failed — Windows is unproven for `d4812eb`, not broken.
+
+Fixed by splitting the matrix into two independent jobs: a `portable` job that tests, lints and
+format-checks `reveille-core` and `reveille-cli` on ubuntu — the invariant that actually matters,
+since those two crates carry the deferred Linux and macOS builds — and a `windows` job that runs
+the whole workspace including the shell. Separate jobs also mean neither leg can cancel the
+other. Installing GTK and WebKit on the ubuntu runner was considered and rejected: it buys a
+Linux build of a crate that is Windows-only for v1, at the cost of an apt step that will rot.
+
+**Open — the same rule is hand-rolled in three places, and one copy is missing.** Endpoint dedup
+on `(address, game_port)` — the right key, since `hostport` is authoritative and multi-instance
+hosts stay distinct — appears in `reveille-cli` `browse_journey_target` and in `reveille-app`
+`browse_servers`, but **not** in the CLI's own `browse` subcommand or in `classify_browse_report`.
+So the one surface that produced the published classification figures is the one that still
+double-counts a duplicate registration. The fix is to dedup inside `discovery::browse` so a
+`BrowseReport` cannot contain two outcomes for one game endpoint, then delete all three
+caller-side copies. Note the provenance rather than re-running a sweep: the master churns by more
+than the effect.
+
+**Open — `arguments_for` traded a magic index for a copy-paste twin.** `LaunchCommand::new` still
+builds `self.arguments` from the same eight literals the `OpenMohaa` branch now rebuilds, so
+there are two sources of truth for one vector: serialization reads the field, launching reads the
+method. Construct the command, then set `arguments` from
+`arguments_for(LaunchDialect::OpenMohaa)`, or drop the field and serialize through the method.
+
+**Open — the Windows platform layer is duplicated across two crates.**
+`crates/reveille-app/src/platform.rs` and `crates/reveille-cli/src/windows.rs` are 187 and 185
+lines of near-identical `detect_client`, `default_client`, `resolve_install_target`,
+`probe_writable` and `launch_client`. Their **tests diverge**: the app copy tests retail
+executable selection but not `detect_client`; the CLI copy tests `detect_client` but not
+executable selection. Each copy is therefore half-covered and a fix to one will not reach the
+other. This is platform policy, so it does not belong in `reveille-core` — it wants a fourth
+crate both binaries depend on.
+
+**Verified as sound — the indexed install and the launched binary are the same install.** Both
+`build_preview` and `install_and_launch` derive from a single `install::identify(path)`, so the
+directory that is scanned, the directory maps are written into, the launch dialect and the
+executable path all descend from one `Installation`. That is what makes "installed
+`aftermath.pk3`, rescanned to Compatible, launched" evidence rather than coincidence. Retail
+correctly has no home fallback; when it falls back on OpenMoHAA the UI reports
+`used_home_fallback`, and the engine's search path puts the home path above the install
+directory, so a pk3 written to either is found.
+
+**Scope of this machine's verification.** 63 tests pass with 3 network tests ignored — Codex's
+66, reproduced — and `clippy -D warnings` and `fmt --check` are clean, on aarch64 Linux, for
+`reveille-core` and `reveille-cli` **only**. The `reveille-app` crate cannot be built here at all,
+so none of the GUI half of the 5,257-line diff has been checked from this machine. The shell's
+behaviour rests on the owner's demonstration.
+
 ---
 
 ## Verification overall
@@ -486,8 +559,9 @@ those after a developer-shaped v1 is how launchers end up developer-shaped.
 Every milestone is checked against measurements already taken this session rather than against
 itself: 88 maps / 0 multi-provider, the two known checksums, the TFC rotation's 7-of-14 split
 and its three distinct resolution outcomes, and the 19 Aug population snapshot.
-`cargo clippy -- -D warnings` and `cargo fmt --check` clean throughout; CI on ubuntu and
-`windows-latest` from commit 1.
+`cargo clippy -- -D warnings` and `cargo fmt --check` clean throughout. CI has run on ubuntu
+and `windows-latest` from commit 1; from `d4812eb` the ubuntu leg covers the portable crates and
+the Windows leg covers the whole workspace, for the reasons in the M6 review.
 
 ## Decisions still open
 

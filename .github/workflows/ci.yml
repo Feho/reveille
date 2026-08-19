@@ -7,17 +7,32 @@ on:
   pull_request:
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  # The portable half. `reveille-core` and `reveille-cli` must keep building and
+  # passing on a non-Windows target, which is what makes the deferred Linux and
+  # macOS builds deferred rather than precluded.
+  portable:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p reveille-core -p reveille-cli --locked
+      - run: cargo clippy -p reveille-core -p reveille-cli --all-targets --locked -- -D warnings
+      - run: cargo fmt --all --check
+
+  # The whole workspace, including the Tauri shell. `reveille-app` is a
+  # Windows-targeted crate for v1; building it on Linux would need the GTK and
+  # WebKit development packages, which buys nothing until a Linux build is in
+  # scope.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo fmt --all --check
