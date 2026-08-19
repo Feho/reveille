@@ -403,14 +403,36 @@ change: retail still has no home path, so `<install>\main` remains its only AA c
 EA App and retail-disc installs, launching the Windows client, and the untested retail 1.11/1.12 launch
 assumption.
 
-**Part B status (19 Aug 2026): implemented, corpus completion blocked on installations.** Live
+### Review of Part B (from the Linux machine, 19 Aug 2026)
+
+- **`com_target_game` finding confirmed against the engine.** `Com_InitTargetGame`
+  (`common.c:3228-3235`) creates it alongside `com_target_demo`/`com_target_version` as part of
+  OpenMoHAA's `target_game_e` multi-target abstraction. Retail shipped three separate
+  executables and has no such cvar. The retail/OpenMoHAA launch-dialect split is right.
+- **Linux build verified here** — 61 tests, `clippy -D warnings`, and `fmt --check` all clean on
+  aarch64 Linux, which the Windows machine cannot check. `crates/reveille-cli/src/windows.rs`
+  compiles everywhere because it only uses portable `std`; `mod windows;` is not `cfg`-gated, so
+  the name is misleading off-Windows, but nothing breaks.
+- **Open — `arguments_for` strips arguments by magic index.** `LaunchCommand::arguments_for`
+  returns `&self.arguments[3..]` for the retail dialect, which is positionally coupled to the
+  eight-element vector built in `LaunchCommand::new` with nothing enforcing the relationship.
+  Correct today; silently wrong the first time an argument is inserted before
+  `com_target_game`, and a panic path if the vector ever shortens. Build each dialect's vector
+  explicitly instead of slicing.
+- **The corpus gap is not a blocker.** Seeding GOG and EA App hashes is an ongoing activity, not
+  a Part B deliverable. `IdentificationMethod::RecognizedBinaryUnknownHashes` exists precisely so
+  an unmeasured binary still identifies honestly, and the PRD states the corpus starts empty and
+  falls back to the build string. Refusing to invent entries was right; gating the milestone on
+  them was not. Buying the GOG copy would seed that half whenever convenient.
+
+**Part B status (19 Aug 2026): implemented; hash corpus holds retail only.** Live
 32- and 64-bit `Uninstall`/Origin enumeration and the engine's 32-bit GOG key are implemented and
 exercised against this Windows machine's real hives. The hives contain no EA App or GOG MOHAA
 install (both correctly report no result). Retail/OpenMoHAA launch dialects, process launch, and
 the probed install-target policy are implemented. The real French retail-disc AA 1.11, Spearhead
 2.15, and Breakthrough 2.40 binaries on this machine seed the corpus and identify through
 `KnownBinaryHashes`. No GOG or EA App binary was available to measure, so those hashes have not
-been invented and Part B cannot honestly be marked complete until real installs are supplied.
+been invented. That is a corpus gap to fill opportunistically, not a milestone blocker.
 
 Report Part A complete on its own rather than holding the milestone open for the move.
 
