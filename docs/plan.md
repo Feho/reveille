@@ -552,6 +552,46 @@ directory, so a pk3 written to either is found.
 so none of the GUI half of the 5,257-line diff has been checked from this machine. The shell's
 behaviour rests on the owner's demonstration.
 
+### Review of the Milestone 6 follow-ups (from the Linux machine, 19 Aug 2026)
+
+All three items landed as briefed (`3d0d877`). Duplicate game endpoints are now **demoted rather
+than dropped** — `ProbeStage::EndpointDeduplication` with
+`NonResultReason::DuplicateEndpoint` — so `registered` and `inspected` stay honest while every
+`servers`-derived figure, `clients_reported` included, stops double-counting. Outcomes are sorted
+before dedup, so which registration is retained is deterministic. `reveille-platform` holds the
+shared Windows policy with both formerly divergent test sets merged. `LaunchCommand::new` derives
+`arguments` through `arguments_for`, with an invariant test.
+
+**Regression introduced by the extraction, fixed in `98e0317`.** The new crate wrapped
+`resolve_install_target`, `probe_writable` and `launch_client` in `#[cfg(windows)]` with
+`cfg(not(windows))` stubs returning `UnsupportedOperatingSystem`. Three consequences, all
+confirmed here:
+
+1. The stubs carry no `# Errors` section, so `clippy -D warnings` fails on Linux at `lib.rs:115`
+   and `:169`. CI run on `3d0d877` is red. Codex's clippy pass was clean because on Windows those
+   stubs do not compile — the portable leg added in `b99eac8` is what caught it.
+2. `reveille-cli journey` died before touching the map index, so the composed pipeline could no
+   longer be exercised on the machine the plan assigns that role to.
+3. `writable_game_directory_is_preferred_without_a_fallback` became `#[cfg(windows)]`, silently
+   dropping probe-and-fallback coverage from the ubuntu leg — the one piece of policy that has
+   already needed correcting twice.
+
+None of it needed the gate: `probe_writable` is `OpenOptions::create_new`,
+`resolve_install_target`'s only Windows-specific call is `env::var_os("APPDATA")` which already
+degrades to `MissingAppData`, and a failed spawn reports a specific `io::Error`, which beats a
+blanket refusal. **Keep this crate portable.** Windows is the only *supported* platform in v1;
+that is a policy statement, not a reason to make the code unbuildable elsewhere.
+
+**Journey verified end to end on Linux against the real corpus.** `journey --path /home/feho/MOHAA
+--client-kind retail 173.249.214.104:12203` browsed, deduped, preflighted at *needs 7 maps*,
+installed 4 archives, re-scanned to *needs 3*, and stopped at `Launch ready:` because `--execute`
+was absent. The 4-of-7 split reproduces the frozen TFC finding exactly: 4 exact matches, 2
+requiring a choice, 1 with no source.
+
+> **Caution for anyone repeating that command.** `/home/feho/MOHAA/main` is the live dedicated
+> server's game directory and the frozen fixture behind `real_corpus.rs`. Installing into it makes
+> the 88-map and 7-of-14 assertions fail. Point `--path` at a copy.
+
 ---
 
 ## Verification overall
