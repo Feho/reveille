@@ -28,7 +28,7 @@ than Windows would.
 
 It cannot do the rest, and the gaps are not incidental: Windows install discovery (registry,
 GOG Galaxy manifests, EA App), the Tauri webview shell, launching the game,
-log tailing, SmartScreen and signing, and Journey A end to end — which *is* the success
+SmartScreen and signing, and Journey A end to end — which *is* the success
 criterion. `aarch64` also means any Tauri build here targets the wrong platform anyway.
 
 **The honest consequence:** install detection is the PRD's first v1 bullet but is Windows-specific,
@@ -376,9 +376,9 @@ clippy and fmt clean.
   This keeps `install_archive`'s existing `game_directory` parameter meaningful — Part B supplies
   the resolved target, and the choice of target is the caller's.
 
-- **Caveat, and it is the untested one:** all of the above is OpenMoHAA. Retail 1.11/1.12 predates
-  the home-path split and most likely writes to the install directory, which is where the UAC risk
-  actually lives. Test this first on the Windows machine.
+- **Caveat, and it is the untested one:** the search-path facts above are OpenMoHAA. Retail
+  1.11/1.12 predates the home-path split and has no home path at all, so the game directory is
+  its only install target. Test retail launch first on the Windows machine.
 
 **Part B — Windows only.** Registry *enumeration*, seeding the hash→version corpus from real GOG,
 EA App and retail-disc installs, launching the Windows client, and the untested retail 1.11/1.12 launch
