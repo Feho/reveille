@@ -311,8 +311,9 @@ name mapping, which is portable logic and belongs in the core crate, not the pla
 - OpenMoHAA install and update from GitHub Releases. Never silently overwrite a running binary.
   Integrity comes from the API's per-asset `digest` field — see the correction above; there is no
   `SHA256SUMS` asset to read.
-- Launch the client and tail `qconsole.log`. Currently exercised only against OpenMoHAA on
-  Linux; retail 1.11/1.12 on Windows is an **assumption** and an early thing to test.
+- Launch the client. Retail 1.11/1.12 launch behaviour on Windows is an **assumption** — it has
+  only ever been exercised against OpenMoHAA on Linux — and is the first thing to test. Log
+  tailing is cut from v1; see above.
 
 **Part A — here, on this machine.** Portable logic with synthetic fixtures, provable by
 `windows-latest` CI: GOG Galaxy manifest and registry-`Uninstall` *layout* parsing, EA App /
@@ -328,32 +329,27 @@ clippy and fmt clean.
 - **The engine's Steam support is vestigial ioquake3.** `Sys_SteamPath` (`sys_win32.c:136-137`)
   carries `STEAMPATH_APPID "2200"` — Quake 3 Arena. Independent corroboration that Steam is not a
   MOHAA path.
-- **`qconsole.log` is off by default.** `com_logfile` is `Cvar_Get("logfile", "0", CVAR_TEMP)`
-  (`code/qcommon/common.c:1909`), so the launcher must pass `+set logfile 2`. Values above 1 force
-  an unbuffered flush (`common.c:288-293`) — with plain `logfile 1` a tailing launcher sees
-  nothing until the buffer flushes or the game exits.
-- **The log lands in the home path under the game directory, not the install directory.**
-  `FS_FOpenFileWrite_HomeData` builds `<fs_homedatapath>/<fs_gamedir>/<name>`
-  (`files.cpp:1027-1030`), and `Sys_DefaultHomePath` (`sys_win32.c:97-120`) resolves to
-  `%APPDATA%\` + `HOMEPATH_NAME_WIN_MOH` = `%APPDATA%\moh` (`q_shared.h:47`; `mohta`/`mohtt` for
-  the expansions). So the Windows default should be **`%APPDATA%\moh\main\qconsole.log`** —
-  source-derived, not observed.
-- **The log is truncated per run and opens with three anchor lines.** These come from `Com_Printf`
-  in `common.c:285-288`, which is shared qcommon code, so a client emits them too:
-  `logfile opened on <date>`, `=> game is version <product> <version> <platform> <date>`, and
-  `=> targeting game ID <n>`. The first is a reliable "the client I just launched has started"
-  marker; the second is a better engine fingerprint than a binary hash for OpenMoHAA and confirms
-  which `com_target_game` took effect. A tail must handle the file shrinking.
+- **Client log tailing is cut from v1** (decision by the project owner, 19 Aug 2026). The client
+  already shows the player whatever the server said, so tailing a log to repeat it buys little
+  and costs a platform-specific log-path hunt plus an unknown retail-versus-OpenMoHAA divergence.
+  `explain_rejection` in `join.rs` stays — it is correct, tested against all nine `sv_client.c`
+  sites, and is the v2 starting point — but it has no input in v1 and must be labelled as not
+  wired up. Consequences: drop `+set logfile 2` from the launch arguments, and do not implement
+  log-path resolution or tailing.
 
-  > **Correction, and a limit on the above.** The `qconsole.log` inspected on this machine
-  > (`/home/feho/.openmohaa/main/qconsole.log`) belongs to the **dedicated server**, not a client.
-  > Two consequences. First, it used a custom `fs_homepath` (`~/.openmohaa`), so it confirms the
-  > *path composition* `<homepath>/<gamedir>/qconsole.log` but says nothing about the default
-  > home-path value. Second, its body — `Client 0 connecting with 5000 challenge ping` and the
-  > like — is server-side output. **No client log has been observed anywhere in this project.**
-  > The cvar behaviour, the path composition and the three header lines are all shared qcommon or
-  > sys code and hold for a client; everything about client-side *body* content is unverified and
-  > must be discovered on the Windows machine before anything parses it.
+  <details><summary>Log facts, retained for v2</summary>
+
+  `com_logfile` is `Cvar_Get("logfile", "0", CVAR_TEMP)` (`common.c:1909`), so the log is off
+  unless asked for; values above 1 force an unbuffered flush (`common.c:288-293`), and plain
+  `logfile 1` buffers so a tail sees nothing until exit. `FS_FOpenFileWrite_HomeData` builds
+  `<fs_homedatapath>/<fs_gamedir>/<name>` (`files.cpp:1027-1030`); `Sys_DefaultHomePath`
+  (`sys_win32.c:97-120`) gives `%APPDATA%\moh` (`q_shared.h:47`). Three header lines come from
+  shared qcommon code (`common.c:285-288`) and would appear in a client log too:
+  `logfile opened on`, `=> game is version`, `=> targeting game ID`. **No client log has ever
+  been observed in this project** — the one inspected was the dedicated server's, under a custom
+  `fs_homepath`. Client-side body content remains entirely unverified.
+
+  </details>
 
 - **Home path outranks the install directory in the search path.** `FS_InitPathVars` registers
   homeconfig, homedata, homestate, then basepath, apppath, steampath, gogpath,
@@ -385,8 +381,8 @@ clippy and fmt clean.
   actually lives. Test this first on the Windows machine.
 
 **Part B — Windows only.** Registry *enumeration*, seeding the hash→version corpus from real GOG,
-EA App and retail-disc installs, launching the Windows client, tailing `qconsole.log`, and the
-untested retail 1.11/1.12 launch assumption.
+EA App and retail-disc installs, launching the Windows client, and the untested retail 1.11/1.12 launch
+assumption.
 
 Report Part A complete on its own rather than holding the milestone open for the move.
 
