@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "name": "published rotation already present",
+      "rotation_published": true,
+      "absent": 0,
+      "checksum_mismatches": 0,
+      "resolution_outcomes": [],
+      "expected": "compatible"
+    },
+    {
+      "name": "TFC mixed shopping list",
+      "rotation_published": true,
+      "absent": 7,
+      "checksum_mismatches": 0,
+      "resolution_outcomes": [
+        "exact",
+        "exact",
+        "exact",
+        "exact",
+        "choice_required",
+        "choice_required",
+        "no_source"
+      ],
+      "expected": "needs_maps"
+    },
+    {
+      "name": "all missing maps exhausted the catalogue",
+      "rotation_published": true,
+      "absent": 1,
+      "checksum_mismatches": 0,
+      "resolution_outcomes": ["no_source"],
+      "expected": "no_source"
+    },
+    {
+      "name": "server omitted sv_maplist",
+      "rotation_published": false,
+      "absent": 0,
+      "checksum_mismatches": 0,
+      "resolution_outcomes": [],
+      "expected": "cant_tell"
+    }
+  ]
+}

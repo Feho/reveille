@@ -124,6 +124,21 @@ pub enum TargetGame {
 }
 
 impl TargetGame {
+    /// Recognize the engine's game-family serverinfo value.
+    #[must_use]
+    pub fn from_game_name(value: &str) -> Option<Self> {
+        // q_shared.h:44,55,68 define the target game names published as com_gamename.
+        if value.eq_ignore_ascii_case("mohaa") {
+            Some(Self::AlliedAssault)
+        } else if value.eq_ignore_ascii_case("mohaas") {
+            Some(Self::Spearhead)
+        } else if value.eq_ignore_ascii_case("mohaab") {
+            Some(Self::Breakthrough)
+        } else {
+            None
+        }
+    }
+
     /// `GameSpy` registration name.
     #[must_use]
     pub const fn game_name(self) -> &'static str {

@@ -116,6 +116,8 @@ pub fn inspect_archive(path: impl AsRef<Path>) -> Result<ArchiveInspection, Arch
         let key = MapKey::new(&normalized_path).ok_or_else(|| ArchiveError::InvalidEntryPath {
             entry: name.clone(),
         })?;
+        // Unlike M1's tolerant scan of an existing install, a stranger's archive must be
+        // wholly engine-loadable before Reveille is willing to install any of it.
         let header = bsp::read_header(&mut entry).map_err(|source| ArchiveError::Bsp {
             entry: name.clone(),
             source,
@@ -252,12 +254,27 @@ pub fn install_archive<Integrity>(
 }
 
 pub(super) fn validate_package_filename(filename: &str) -> Result<(), ArchiveError> {
+    let device_basename = filename
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches([' ', '.'])
+        .to_ascii_uppercase();
+    let reserved_device = matches!(device_basename.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || device_basename
+            .strip_prefix("COM")
+            .or_else(|| device_basename.strip_prefix("LPT"))
+            .is_some_and(|number| {
+                matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+            });
     if filename.is_empty()
         || filename.contains('/')
         || filename.contains('\\')
         || filename.contains(':')
         || filename == "."
         || filename == ".."
+        || filename.ends_with(['.', ' '])
+        || reserved_device
         || !filename.to_ascii_lowercase().ends_with(".pk3")
     {
         return Err(ArchiveError::UnsafeFilename(filename.to_owned()));
@@ -382,6 +399,7 @@ mod tests {
     use super::{
         ArchiveError, ArchiveInspection, ArchiveMap, DownloadedArchive, MohDbIntegrity,
         confirm_map, disambiguate_by_checksum, inspect_archive, install_archive,
+        validate_package_filename,
     };
     use crate::bsp::Checksum;
 
@@ -452,6 +470,30 @@ mod tests {
             inspect_archive(&library),
             Err(ArchiveError::ForbiddenEntry { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_windows_device_names_and_trailing_dots_or_spaces() {
+        for filename in [
+            "CON.pk3",
+            "prn.extra.pk3",
+            "AUX.PK3",
+            "nul.pk3",
+            "COM1.pk3",
+            "com9.extra.pk3",
+            "LPT1.pk3",
+            "lpt9.extra.pk3",
+            "evil.pk3.",
+            "evil.pk3 ",
+        ] {
+            assert!(matches!(
+                validate_package_filename(filename),
+                Err(ArchiveError::UnsafeFilename(_))
+            ));
+        }
+        for filename in ["COM0.pk3", "COM10.pk3", "LPT0.pk3", "LPT10.pk3", "safe.pk3"] {
+            validate_package_filename(filename).expect("safe package filename");
+        }
     }
 
     #[test]

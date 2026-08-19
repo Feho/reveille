@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use reveille_core::content::{self, ResolutionOutcome, WantedMap};
 use reveille_core::discovery::{self, BrowseConfig, TargetGame};
 use reveille_core::install;
+use reveille_core::join::{CompatibilityState, FsGame, LaunchCommand, LaunchProfile};
 use reveille_core::mapindex::MapIndex;
 use serde::Serialize;
 
@@ -47,6 +48,9 @@ enum Command {
         /// Master-server I/O deadline in milliseconds.
         #[arg(long, default_value_t = 15_000)]
         master_timeout_ms: u64,
+        /// Optional installation root used to classify every reachable server.
+        #[arg(long)]
+        path: Option<PathBuf>,
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
@@ -61,6 +65,31 @@ enum Command {
         #[arg(long, default_value_t = 2_500)]
         timeout_ms: u64,
         /// Deadline for each moh-db request in milliseconds.
+        #[arg(long, default_value_t = 15_000)]
+        catalogue_timeout_ms: u64,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Preflight one server, resolve needed content, and emit (but do not run) its launch command.
+    Join {
+        /// Authoritative server game address, such as 173.249.214.104:12203.
+        server: SocketAddrV4,
+        /// MOHAA installation/profile root.
+        path: PathBuf,
+        /// Fallback profile when the server omits or mangles `com_gamename`.
+        #[arg(long, value_enum, default_value_t = Game::AlliedAssault)]
+        game: Game,
+        /// Override the server-published mod directory. Empty selects the profile's base game.
+        #[arg(long)]
+        fs_game: Option<String>,
+        /// Client program to place in the command description. It is not opened or executed.
+        #[arg(long, default_value = "openmohaa")]
+        client: String,
+        /// Per-server status-query deadline in milliseconds.
+        #[arg(long, default_value_t = 2_500)]
+        timeout_ms: u64,
+        /// Deadline for each content-source request in milliseconds.
         #[arg(long, default_value_t = 15_000)]
         catalogue_timeout_ms: u64,
         /// Output format.
@@ -105,6 +134,27 @@ struct ScanOutput<'a> {
 struct BrowseOutput<'a> {
     summary: discovery::BrowseSummary,
     report: &'a discovery::BrowseReport,
+    compatibility: &'a Option<BrowseCompatibility>,
+}
+
+#[derive(Serialize)]
+struct BrowseCompatibility {
+    summary: CompatibilitySummary,
+    servers: Vec<ClassifiedServer>,
+}
+
+#[derive(Default, Serialize)]
+struct CompatibilitySummary {
+    compatible: usize,
+    needs_maps: usize,
+    no_source: usize,
+    cant_tell: usize,
+}
+
+#[derive(Serialize)]
+struct ClassifiedServer {
+    server: SocketAddrV4,
+    state: CompatibilityState,
 }
 
 #[derive(Serialize)]
@@ -121,6 +171,27 @@ struct PakRadarOutput {
     url: String,
     entries: Vec<content::PakRadarEntry>,
     non_result: Option<String>,
+}
+
+#[derive(Serialize)]
+struct JoinOutput<'a> {
+    server: SocketAddrV4,
+    game_directory: &'a Path,
+    compatibility: &'a CompatibilityState,
+    preflight: &'a Option<reveille_core::preflight::Report>,
+    pakradar: &'a Option<PakRadarOutput>,
+    launch: &'a LaunchCommand,
+}
+
+struct JoinRequest<'a> {
+    server: SocketAddrV4,
+    install_root: &'a Path,
+    fallback_target: TargetGame,
+    fs_game_override: Option<String>,
+    client: String,
+    server_timeout: Duration,
+    catalogue_timeout: Duration,
+    format: Format,
 }
 
 #[tokio::main]
@@ -145,6 +216,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             concurrency,
             timeout_ms,
             master_timeout_ms,
+            path,
             format,
         } => {
             browse_servers(
@@ -155,6 +227,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
                     master_timeout: Duration::from_millis(master_timeout_ms),
                     probe_timeout: Duration::from_millis(timeout_ms),
                 },
+                path.as_deref(),
                 format,
             )
             .await
@@ -175,6 +248,216 @@ async fn run() -> Result<(), Box<dyn Error>> {
             )
             .await
         }
+        Command::Join {
+            server,
+            path,
+            game,
+            fs_game,
+            client,
+            timeout_ms,
+            catalogue_timeout_ms,
+            format,
+        } => {
+            join_server(JoinRequest {
+                server,
+                install_root: &path,
+                fallback_target: game.into(),
+                fs_game_override: fs_game,
+                client,
+                server_timeout: Duration::from_millis(timeout_ms),
+                catalogue_timeout: Duration::from_millis(catalogue_timeout_ms),
+                format,
+            })
+            .await
+        }
+    }
+}
+
+async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
+    let JoinRequest {
+        server,
+        install_root,
+        fallback_target,
+        fs_game_override,
+        client,
+        server_timeout,
+        catalogue_timeout,
+        format,
+    } = request;
+    let game_port = discovery::GamePort::new(server.port());
+    let status = discovery::query_getstatus(*server.ip(), game_port, server_timeout).await?;
+    let target = status
+        .get("com_gamename")
+        .and_then(|value| TargetGame::from_game_name(value))
+        .unwrap_or(fallback_target);
+    let profile = LaunchProfile::new(target);
+    let game_directory = install_root.join(profile.data_directory());
+    let index = MapIndex::scan(&game_directory)?;
+    let rotation = status
+        .get("sv_maplist")
+        .map(|value| value.split_whitespace().collect::<Vec<_>>())
+        .filter(|rotation| !rotation.is_empty());
+    let published_checksum = published_checksum(&status);
+    let preflight = rotation.as_ref().map(|rotation| {
+        reveille_core::preflight::check(&index, rotation, published_checksum.as_ref())
+    });
+    let wanted = preflight.as_ref().map_or_else(Vec::new, wanted_maps);
+
+    // No published rotation means Can't tell immediately and deliberately makes no moh-db call.
+    let catalogue = if rotation.is_none() || wanted.is_empty() {
+        None
+    } else {
+        Some(
+            content::MohDbClient::new(catalogue_timeout)?
+                .resolve_all(&wanted)
+                .await,
+        )
+    };
+    let pakradar = if wanted.is_empty() {
+        None
+    } else {
+        fetch_pakradar(&status, catalogue_timeout).await
+    };
+    let compatibility = reveille_core::join::classify(preflight.as_ref(), catalogue.as_ref());
+
+    let fs_game_value = fs_game_override
+        .or_else(|| status.get("fs_game").cloned())
+        .unwrap_or_default();
+    let fs_game_value = if fs_game_value.eq_ignore_ascii_case(profile.data_directory()) {
+        String::new()
+    } else {
+        fs_game_value
+    };
+    let launch = LaunchCommand::new(client, profile, FsGame::new(fs_game_value)?, server)?;
+
+    match format {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&JoinOutput {
+                server,
+                game_directory: &game_directory,
+                compatibility: &compatibility,
+                preflight: &preflight,
+                pakradar: &pakradar,
+                launch: &launch,
+            })?
+        ),
+        Format::Text => render_join(
+            server,
+            &compatibility,
+            pakradar.as_ref(),
+            catalogue.as_ref(),
+            &launch,
+        ),
+    }
+    Ok(())
+}
+
+fn published_checksum(
+    status: &discovery::FieldMap,
+) -> Option<reveille_core::preflight::PublishedChecksum> {
+    status
+        .get("mapname")
+        .zip(status.get("sv_mapChecksum"))
+        .and_then(|(map, checksum)| {
+            checksum.parse::<i32>().ok().map(|checksum| {
+                reveille_core::preflight::PublishedChecksum {
+                    map: map.clone(),
+                    checksum: reveille_core::bsp::Checksum::new(checksum),
+                }
+            })
+        })
+}
+
+fn wanted_maps(preflight: &reveille_core::preflight::Report) -> Vec<WantedMap> {
+    preflight
+        .maps
+        .iter()
+        .filter(|map| {
+            matches!(
+                map.status,
+                reveille_core::preflight::MapStatus::Absent
+                    | reveille_core::preflight::MapStatus::ChecksumDiffers { .. }
+            )
+        })
+        .filter_map(|map| WantedMap::new(map.map.clone()))
+        .collect()
+}
+
+async fn fetch_pakradar(status: &discovery::FieldMap, timeout: Duration) -> Option<PakRadarOutput> {
+    let url = status.get("pr_downloads")?;
+    Some(match content::fetch_filelist(url, timeout).await {
+        Ok(entries) => PakRadarOutput {
+            url: url.clone(),
+            entries,
+            non_result: None,
+        },
+        Err(error) => PakRadarOutput {
+            url: url.clone(),
+            entries: Vec::new(),
+            non_result: Some(error.to_string()),
+        },
+    })
+}
+
+fn render_join(
+    server: SocketAddrV4,
+    compatibility: &CompatibilityState,
+    pakradar: Option<&PakRadarOutput>,
+    catalogue: Option<&content::CatalogueResolutionPass>,
+    launch: &LaunchCommand,
+) {
+    println!("Server: {server}");
+    match compatibility {
+        CompatibilityState::Compatible => {
+            println!("Compatibility: Compatible — nothing checkable is wrong");
+        }
+        CompatibilityState::NeedsMaps { count, .. } => {
+            println!("Compatibility: Needs {count} maps");
+        }
+        CompatibilityState::NoSource { count } => {
+            println!("Compatibility: No source for {count} needed maps");
+        }
+        CompatibilityState::CantTell => {
+            println!("Compatibility: Can't tell — server did not publish a rotation");
+        }
+    }
+    if let Some(catalogue) = catalogue {
+        render_content_sources(pakradar, catalogue);
+    }
+    println!(
+        "Profile: {} ({})",
+        launch.profile.target,
+        launch.profile.data_directory()
+    );
+    println!(
+        "fs_game: {}",
+        if launch.fs_game.as_str().is_empty() {
+            "<base>"
+        } else {
+            launch.fs_game.as_str()
+        }
+    );
+    println!("Launch (not executed): {}", render_launch_command(launch));
+}
+
+fn render_launch_command(command: &LaunchCommand) -> String {
+    std::iter::once(command.program.as_str())
+        .chain(command.arguments.iter().map(String::as_str))
+        .map(shell_quote)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_quote(part: &str) -> String {
+    if !part.is_empty()
+        && part
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "_@%+=:,./-".contains(character))
+    {
+        part.to_owned()
+    } else {
+        format!("'{}'", part.replace('\'', "'\\''"))
     }
 }
 
@@ -263,6 +546,13 @@ fn render_resolution(
 ) {
     println!("Server: {server}");
     println!("Preflight: {:?}", preflight.verdict);
+    render_content_sources(pakradar, catalogue);
+}
+
+fn render_content_sources(
+    pakradar: Option<&PakRadarOutput>,
+    catalogue: &content::CatalogueResolutionPass,
+) {
     println!(
         "Maps requiring content: {}",
         catalogue.resolutions.len() + catalogue.non_results.len()
@@ -315,15 +605,25 @@ fn render_resolution(
     }
 }
 
-async fn browse_servers(config: BrowseConfig, format: Format) -> Result<(), Box<dyn Error>> {
+async fn browse_servers(
+    config: BrowseConfig,
+    install_root: Option<&Path>,
+    format: Format,
+) -> Result<(), Box<dyn Error>> {
+    let target = config.target;
     let report = discovery::browse(config).await?;
     let summary = report.summary();
+    let compatibility = install_root
+        .map(|root| MapIndex::scan(root.join(LaunchProfile::new(target).data_directory())))
+        .transpose()?
+        .map(|index| classify_browse_report(&index, &report));
     match format {
         Format::Json => println!(
             "{}",
             serde_json::to_string_pretty(&BrowseOutput {
                 summary,
                 report: &report,
+                compatibility: &compatibility,
             })?
         ),
         Format::Text => {
@@ -346,6 +646,12 @@ async fn browse_servers(config: BrowseConfig, format: Format) -> Result<(), Box<
             println!("PakRadar manifests: {}", summary.pakradar_published);
             println!("pure published: {}", summary.pure_published);
             println!("Protocols: {:?}", summary.protocols);
+            if let Some(compatibility) = &compatibility {
+                println!("Compatible: {}", compatibility.summary.compatible);
+                println!("Needs maps: {}", compatibility.summary.needs_maps);
+                println!("No source: {}", compatibility.summary.no_source);
+                println!("Can't tell: {}", compatibility.summary.cant_tell);
+            }
 
             let mut servers = report
                 .outcomes
@@ -379,6 +685,31 @@ async fn browse_servers(config: BrowseConfig, format: Format) -> Result<(), Box<
         }
     }
     Ok(())
+}
+
+fn classify_browse_report(
+    index: &MapIndex,
+    report: &discovery::BrowseReport,
+) -> BrowseCompatibility {
+    let servers = report
+        .outcomes
+        .iter()
+        .filter_map(|outcome| outcome.server.as_ref())
+        .map(|server| ClassifiedServer {
+            server: SocketAddrV4::new(server.endpoint.address, server.game_port.get()),
+            state: reveille_core::join::classify_server(index, server, None).state,
+        })
+        .collect::<Vec<_>>();
+    let mut summary = CompatibilitySummary::default();
+    for server in &servers {
+        match server.state {
+            CompatibilityState::Compatible => summary.compatible += 1,
+            CompatibilityState::NeedsMaps { .. } => summary.needs_maps += 1,
+            CompatibilityState::NoSource { .. } => summary.no_source += 1,
+            CompatibilityState::CantTell => summary.cant_tell += 1,
+        }
+    }
+    BrowseCompatibility { summary, servers }
 }
 
 fn render_occupancy(
@@ -446,11 +777,14 @@ fn scan(path: &Path, format: Format) -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use reveille_core::discovery::{
-        BotsReported, ClientCapacity, ClientsReported, ReportedOccupancy,
-    };
+    use std::net::{Ipv4Addr, SocketAddrV4};
 
-    use super::render_occupancy;
+    use reveille_core::discovery::{
+        BotsReported, ClientCapacity, ClientsReported, ReportedOccupancy, TargetGame,
+    };
+    use reveille_core::join::{FsGame, LaunchCommand, LaunchProfile};
+
+    use super::{render_launch_command, render_occupancy};
 
     #[test]
     fn renders_equal_mixed_client_and_bot_counts_additively() {
@@ -471,6 +805,22 @@ mod tests {
         assert_eq!(
             render_occupancy(occupancy, Some(ClientCapacity::new(32))),
             "3 clients (+8 bots) · cap 32"
+        );
+    }
+
+    #[test]
+    fn renders_the_emitted_launch_command_without_running_it() {
+        let command = LaunchCommand::new(
+            "/opt/Open MOHAA/openmohaa",
+            LaunchProfile::new(TargetGame::AlliedAssault),
+            FsGame::new("").expect("base game"),
+            SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 9), 12_203),
+        )
+        .expect("launch command");
+
+        assert_eq!(
+            render_launch_command(&command),
+            "'/opt/Open MOHAA/openmohaa' +set com_target_game 0 +set fs_game '' +connect 203.0.113.9:12203"
         );
     }
 }

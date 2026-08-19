@@ -309,6 +309,8 @@ impl MapIndex {
             let header = match bsp::read_header(&mut entry) {
                 Ok(header) => header,
                 Err(reason) => {
+                    // M1 inventories the user's existing install, so one junk BSP is recorded
+                    // and skipped instead of invalidating every otherwise usable map.
                     self.skip(path, original, reason.into());
                     continue;
                 }
@@ -414,6 +416,8 @@ impl MapIndex {
             let header = match bsp::read_header(BufReader::new(bsp_file)) {
                 Ok(header) => header,
                 Err(reason) => {
+                    // M1 inventories the user's existing install, so one junk BSP is recorded
+                    // and skipped instead of invalidating every otherwise usable map.
                     self.skip(file.path(), original, reason.into());
                     continue;
                 }
