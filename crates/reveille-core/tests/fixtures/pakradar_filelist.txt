@@ -1,0 +1,11 @@
+map {
+  alias "LuV Map Pack 1"
+  md5 "1cdd05c74995132c64747650fa3eebb6"
+  url "https://luvclan.eu/themes/luv/downloads/zzzz_LuV__Map_Pack_1.pk3"
+}
+
+map {
+  alias "LuV Final Map Pack"
+  md5 "6ff08a92e7daa131efc5fdfeed0e20fe"
+  url "https://luvclan.eu/themes/luv/downloads/zzzz_LuV_Final_Map_Pack.pk3"
+}
