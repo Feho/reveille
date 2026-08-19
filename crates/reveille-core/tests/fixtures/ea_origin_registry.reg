@@ -1,0 +1,15 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\EA-MOHAA]
+"DisplayName"="Medal of Honor Allied Assault War Chest"
+"Publisher"="Electronic Arts"
+"InstallLocation"="D:\\EA Games\\Medal of Honor Allied Assault\\"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\EA Games\Medal of Honor Allied Assault]
+"DisplayName"="Medal of Honor Allied Assault"
+"Install Dir"="E:\\Origin Games\\Medal of Honor Allied Assault"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\EA-App]
+"DisplayName"="EA app"
+"Publisher"="Electronic Arts"
+"InstallLocation"="C:\\Program Files\\Electronic Arts\\EA Desktop\\EA Desktop"

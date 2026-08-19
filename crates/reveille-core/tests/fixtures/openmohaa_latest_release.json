@@ -1,0 +1,23 @@
+{
+  "tag_name": "v0.82.1",
+  "assets": [
+    {
+      "name": "openmohaa-v0.82.1-windows-x64-pdb.zip",
+      "browser_download_url": "https://example.invalid/openmohaa-pdb.zip",
+      "size": 17599289,
+      "digest": "sha256:88a7c61df819284eaf6ba348964d7aa21f46835e311b88f9142232bfc8f10d24"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-x64.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-x64.zip",
+      "size": 5424647,
+      "digest": "sha256:dba183f9c666928b3925e6fdd1f2a780517ef283170d14d55b7650607ca7bb6d"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-arm64.zip",
+      "browser_download_url": "https://example.invalid/openmohaa-arm64.zip",
+      "size": 4941693,
+      "digest": "sha256:22c6c17b29b6daa1d6ee316a5249f113fc65d164812ee2a2ca36b9f8b57ec71b"
+    }
+  ]
+}

@@ -10,4 +10,5 @@ pub mod discovery;
 pub mod install;
 pub mod join;
 pub mod mapindex;
+pub mod platform;
 pub mod preflight;

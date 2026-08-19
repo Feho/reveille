@@ -33,6 +33,15 @@
       "expected": "no_source"
     },
     {
+      "name": "catalogue lookup was a non-result",
+      "rotation_published": true,
+      "absent": 1,
+      "checksum_mismatches": 0,
+      "resolution_outcomes": [],
+      "non_results": 1,
+      "expected": "needs_maps"
+    },
+    {
       "name": "server omitted sv_maplist",
       "rotation_published": false,
       "absent": 0,

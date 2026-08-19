@@ -92,7 +92,7 @@ const CLIENT_BINARIES: [&str; 5] = [
     "openmohaa",
 ];
 
-// Deliberately empty until real retail/GOG/Steam/OpenMoHAA binaries are verified.
+// Deliberately empty until real retail/GOG/EA App/OpenMoHAA binaries are verified on Windows.
 const KNOWN_BINARY_VERSIONS: [(&str, &str); 0] = [];
 
 /// Identify a user-selected install root without applying platform discovery policy.

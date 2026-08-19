@@ -1,0 +1,16 @@
+{
+  "gameId": "1234567890",
+  "rootGameId": "1234567890",
+  "standalone": true,
+  "dependencyGameId": "",
+  "language": "English",
+  "name": "Medal of Honor: Allied Assault War Chest",
+  "playTasks": [
+    {
+      "isPrimary": true,
+      "type": "FileTask",
+      "path": "game\\mohaa.exe",
+      "workingDir": "game"
+    }
+  ]
+}

@@ -3,8 +3,8 @@
 //! Hermetic coverage of the four player-visible compatibility states.
 
 use reveille_core::content::{
-    CatalogueCandidate, CatalogueResolution, CatalogueResolutionPass, FileSize, ResolutionOutcome,
-    WantedMap,
+    CatalogueCandidate, CatalogueNonResult, CatalogueNonResultReason, CatalogueResolution,
+    CatalogueResolutionPass, FileSize, ResolutionOutcome, WantedMap,
 };
 use reveille_core::join::{CompatibilityState, classify};
 use reveille_core::mapindex::MapKey;
@@ -23,6 +23,8 @@ struct Case {
     absent: usize,
     checksum_mismatches: usize,
     resolution_outcomes: Vec<String>,
+    #[serde(default)]
+    non_results: usize,
     expected: String,
 }
 
@@ -66,11 +68,17 @@ fn frozen_cases_cover_exactly_the_four_gate_states() {
                 .enumerate()
                 .map(|(index, outcome)| resolution(index, outcome))
                 .collect(),
-            non_results: Vec::new(),
+            non_results: (0..case.non_results)
+                .map(|index| CatalogueNonResult {
+                    wanted: WantedMap::new(format!("obj/non_result_{index}"))
+                        .expect("valid non-result map"),
+                    reason: CatalogueNonResultReason::Timeout,
+                })
+                .collect(),
         };
         let state = classify(
             case.rotation_published.then_some(&report),
-            (!pass.resolutions.is_empty()).then_some(&pass),
+            (!pass.resolutions.is_empty() || !pass.non_results.is_empty()).then_some(&pass),
         );
         let actual = match &state {
             CompatibilityState::Compatible => "compatible",

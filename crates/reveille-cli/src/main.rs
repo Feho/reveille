@@ -10,7 +10,9 @@ use clap::{Parser, Subcommand, ValueEnum};
 use reveille_core::content::{self, ResolutionOutcome, WantedMap};
 use reveille_core::discovery::{self, BrowseConfig, TargetGame};
 use reveille_core::install;
-use reveille_core::join::{CompatibilityState, FsGame, LaunchCommand, LaunchProfile};
+use reveille_core::join::{
+    CompatibilityAssessment, CompatibilityState, FsGame, LaunchCommand, LaunchProfile,
+};
 use reveille_core::mapindex::MapIndex;
 use serde::Serialize;
 
@@ -154,7 +156,7 @@ struct CompatibilitySummary {
 #[derive(Serialize)]
 struct ClassifiedServer {
     server: SocketAddrV4,
-    state: CompatibilityState,
+    assessment: CompatibilityAssessment,
 }
 
 #[derive(Serialize)]
@@ -670,12 +672,24 @@ async fn browse_servers(
             println!("Servers (client slots and bots are disjoint reported quantities):");
             for server in servers {
                 let occupancy = render_occupancy(server.occupancy, server.client_capacity);
+                let compatibility_state = compatibility.as_ref().and_then(|compatibility| {
+                    let address =
+                        SocketAddrV4::new(server.endpoint.address, server.game_port.get());
+                    compatibility
+                        .servers
+                        .iter()
+                        .find(|classified| classified.server == address)
+                        .map(|classified| render_compatibility_state(&classified.assessment.state))
+                });
                 println!(
-                    "  {}:{}  {occupancy}  protocol={}  maps={}  {}",
+                    "  {}:{}  {occupancy}  protocol={}  maps={}{}  {}",
                     server.endpoint.address,
                     server.game_port,
                     server.protocol.as_deref().unwrap_or("?"),
                     server.rotation.len(),
+                    compatibility_state
+                        .map(|state| format!("  {state}"))
+                        .unwrap_or_default(),
                     server.hostname
                 );
             }
@@ -697,12 +711,12 @@ fn classify_browse_report(
         .filter_map(|outcome| outcome.server.as_ref())
         .map(|server| ClassifiedServer {
             server: SocketAddrV4::new(server.endpoint.address, server.game_port.get()),
-            state: reveille_core::join::classify_server(index, server, None).state,
+            assessment: reveille_core::join::classify_server(index, server, None),
         })
         .collect::<Vec<_>>();
     let mut summary = CompatibilitySummary::default();
     for server in &servers {
-        match server.state {
+        match server.assessment.state {
             CompatibilityState::Compatible => summary.compatible += 1,
             CompatibilityState::NeedsMaps { .. } => summary.needs_maps += 1,
             CompatibilityState::NoSource { .. } => summary.no_source += 1,
@@ -710,6 +724,15 @@ fn classify_browse_report(
         }
     }
     BrowseCompatibility { summary, servers }
+}
+
+fn render_compatibility_state(state: &CompatibilityState) -> String {
+    match state {
+        CompatibilityState::Compatible => "compatible".to_owned(),
+        CompatibilityState::NeedsMaps { count, .. } => format!("needs {count} maps"),
+        CompatibilityState::NoSource { count } => format!("no source for {count} maps"),
+        CompatibilityState::CantTell => "can't tell".to_owned(),
+    }
 }
 
 fn render_occupancy(
@@ -782,9 +805,13 @@ mod tests {
     use reveille_core::discovery::{
         BotsReported, ClientCapacity, ClientsReported, ReportedOccupancy, TargetGame,
     };
-    use reveille_core::join::{FsGame, LaunchCommand, LaunchProfile};
+    use reveille_core::join::{
+        CompatibilityAssessment, CompatibilityState, FsGame, LaunchCommand, LaunchProfile,
+    };
 
-    use super::{render_launch_command, render_occupancy};
+    use super::{
+        ClassifiedServer, render_compatibility_state, render_launch_command, render_occupancy,
+    };
 
     #[test]
     fn renders_equal_mixed_client_and_bot_counts_additively() {
@@ -821,6 +848,26 @@ mod tests {
         assert_eq!(
             render_launch_command(&command),
             "'/opt/Open MOHAA/openmohaa' +set com_target_game 0 +set fs_game '' +connect 203.0.113.9:12203"
+        );
+    }
+
+    #[test]
+    fn browse_json_keeps_each_servers_full_compatibility_assessment() {
+        let classified = ClassifiedServer {
+            server: SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 10), 12_203),
+            assessment: CompatibilityAssessment {
+                state: CompatibilityState::CantTell,
+                preflight: None,
+            },
+        };
+
+        let value = serde_json::to_value(classified).expect("classified server serializes");
+        assert_eq!(value["server"], "203.0.113.10:12203");
+        assert_eq!(value["assessment"]["state"]["state"], "cant_tell");
+        assert!(value["assessment"]["preflight"].is_null());
+        assert_eq!(
+            render_compatibility_state(&CompatibilityState::CantTell),
+            "can't tell"
         );
     }
 }
