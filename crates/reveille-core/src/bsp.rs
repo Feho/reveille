@@ -36,7 +36,8 @@ impl std::fmt::Display for Checksum {
 pub struct Header {
     /// Header marker used by the map.
     pub ident: Ident,
-    /// BSP format version. Older custom maps are valid, so callers must not gate on this.
+    /// BSP format version, already validated as `17..=21` like `CM_LoadMap`
+    /// (`code/qcommon/cm_load.c:894`).
     pub version: i32,
     /// Checksum used by `CM_Checksum` and published as `sv_mapChecksum`.
     pub checksum: Checksum,

@@ -1,0 +1,21 @@
+{
+  "source": "code/gamespy/gutil.c via the working spike_masterlist.py",
+  "key": "M5Fdwc",
+  "vectors": [
+    {
+      "challenge": "ABCDEF",
+      "encrypted_hex": "880dad7a5f34",
+      "encoded": "iA2tel80"
+    },
+    {
+      "challenge": "WXYZ12",
+      "encrypted_hex": "78079b555566",
+      "encoded": "eAebVVVm"
+    },
+    {
+      "challenge": "000000",
+      "encrypted_hex": "c0002e2f709e",
+      "encoded": "wAAuL3Ce"
+    }
+  ]
+}
