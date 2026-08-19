@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Shared Windows launcher policy for Reveille's executable front ends.
+//! Shared launcher and content-path policy for Reveille's executable front ends.
+//!
+//! The policy encoded here targets Windows, which is v1's only supported platform, but the code
+//! is portable so the composed pipeline stays exercisable — and testable in CI — on Linux.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Child;
 
-#[cfg(windows)]
 use std::env;
-#[cfg(windows)]
 use std::fs::{self, OpenOptions};
-#[cfg(windows)]
 use std::process::Command;
 
 use reveille_core::discovery::TargetGame;
@@ -72,9 +72,8 @@ pub struct InstallTarget {
 ///
 /// # Errors
 ///
-/// Returns an error outside Windows, for an unwritable retail directory, or when the `OpenMoHAA`
-/// fallback cannot be created and verified writable.
-#[cfg(windows)]
+/// Returns an error for an unwritable retail directory, or when the `OpenMoHAA` fallback cannot
+/// be located, created, and verified writable.
 pub fn resolve_install_target(
     install_root: &Path,
     data_directory: &str,
@@ -109,18 +108,6 @@ pub fn resolve_install_target(
     }
 }
 
-/// Refuse Windows content-path policy on another operating system while keeping portable callers
-/// buildable.
-#[cfg(not(windows))]
-pub fn resolve_install_target(
-    _install_root: &Path,
-    _data_directory: &str,
-    _client: ClientKind,
-) -> Result<InstallTarget, PlatformError> {
-    Err(PlatformError::UnsupportedOperatingSystem)
-}
-
-#[cfg(windows)]
 fn probe_writable(directory: &Path) -> io::Result<()> {
     for suffix in 0..16 {
         let path = directory.join(format!(
@@ -146,8 +133,7 @@ fn probe_writable(directory: &Path) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error outside Windows or when the process cannot be spawned.
-#[cfg(windows)]
+/// Returns an error when the process cannot be spawned.
 pub fn launch_client(command: &LaunchCommand, client: ClientKind) -> Result<Child, PlatformError> {
     let program = Path::new(&command.program);
     let mut process = Command::new(program);
@@ -164,21 +150,9 @@ pub fn launch_client(command: &LaunchCommand, client: ClientKind) -> Result<Chil
     })
 }
 
-/// Refuse process spawning on operating systems outside the Windows v1 scope.
-#[cfg(not(windows))]
-pub fn launch_client(
-    _command: &LaunchCommand,
-    _client: ClientKind,
-) -> Result<Child, PlatformError> {
-    Err(PlatformError::UnsupportedOperatingSystem)
-}
-
 /// Windows launcher policy failure.
 #[derive(Debug, Error)]
 pub enum PlatformError {
-    /// This operation is deliberately Windows-only in v1.
-    #[error("Reveille launch and install-target policy is available only on Windows in v1")]
-    UnsupportedOperatingSystem,
     /// Retail has no engine home directory to use instead.
     #[error("retail has no writable fallback for {path}")]
     RetailUnwritable {
@@ -250,7 +224,6 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
     #[test]
     fn writable_game_directory_is_preferred_without_a_fallback() {
         let temporary = TempDir::new().expect("temporary directory");
