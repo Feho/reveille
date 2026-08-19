@@ -14,7 +14,7 @@ use crate::discovery::{Server, TargetGame};
 use crate::mapindex::MapIndex;
 use crate::preflight::{PublishedChecksum, Report, Verdict};
 
-/// Number of rotation entries known to require different or absent local content.
+/// Number of distinct maps known to require different or absent local content.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct MapsNeeded(usize);
@@ -50,14 +50,14 @@ pub enum CompatibilityState {
     Compatible,
     /// The published rotation proves that local content is absent or differs.
     NeedsMaps {
-        /// Number of affected rotation entries.
+        /// Number of affected distinct maps.
         count: MapsNeeded,
         /// Optional source-resolution details. The verdict does not depend on their presence.
         shopping_list: Option<CatalogueResolutionPass>,
     },
     /// Every needed entry was conclusively looked up and none has a catalogue source.
     NoSource {
-        /// Number of affected rotation entries.
+        /// Number of affected distinct maps.
         count: MapsNeeded,
     },
     /// The server did not publish a usable rotation, so there is no preflight evidence.
@@ -227,7 +227,7 @@ pub struct LaunchCommand {
     pub fs_game: FsGame,
     /// Authoritative game address.
     pub server: SocketAddrV4,
-    /// Exact argument vector to pass to a future process-launching platform layer.
+    /// `OpenMoHAA` argument vector retained for serialization and display.
     pub arguments: Vec<String>,
 }
 
@@ -278,11 +278,27 @@ impl LaunchCommand {
 
     /// Return the argument vector understood by the selected engine.
     #[must_use]
-    pub fn arguments_for(&self, dialect: LaunchDialect) -> &[String] {
+    pub fn arguments_for(&self, dialect: LaunchDialect) -> Vec<String> {
         match dialect {
-            LaunchDialect::OpenMohaa => &self.arguments,
-            // Retail binaries contain `fs_game` but not OpenMoHAA's `com_target_game` cvar.
-            LaunchDialect::Retail => &self.arguments[3..],
+            LaunchDialect::OpenMohaa => vec![
+                "+set".to_owned(),
+                "com_target_game".to_owned(),
+                self.profile.target_game_id().to_string(),
+                "+set".to_owned(),
+                "fs_game".to_owned(),
+                self.fs_game.as_str().to_owned(),
+                "+connect".to_owned(),
+                self.server.to_string(),
+            ],
+            // Retail binaries select the product by executable and do not define
+            // OpenMoHAA's `com_target_game` cvar.
+            LaunchDialect::Retail => vec![
+                "+set".to_owned(),
+                "fs_game".to_owned(),
+                self.fs_game.as_str().to_owned(),
+                "+connect".to_owned(),
+                self.server.to_string(),
+            ],
         }
     }
 }

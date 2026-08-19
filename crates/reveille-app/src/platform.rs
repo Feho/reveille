@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Windows caller-side policy for content placement and client launch.
-
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io;
@@ -49,7 +47,6 @@ pub(crate) fn default_client(
     install_root.join(filename)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct InstallTarget {
     pub(crate) game_directory: PathBuf,
     pub(crate) used_home_fallback: bool,
@@ -91,14 +88,14 @@ pub(crate) fn resolve_install_target(
 
 fn probe_writable(directory: &Path) -> io::Result<()> {
     for suffix in 0..16 {
-        let probe = directory.join(format!(
+        let path = directory.join(format!(
             ".reveille-write-probe-{}-{suffix}",
             std::process::id()
         ));
-        match OpenOptions::new().write(true).create_new(true).open(&probe) {
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(file) => {
                 drop(file);
-                return fs::remove_file(probe);
+                return fs::remove_file(path);
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
@@ -155,31 +152,36 @@ pub(crate) enum PlatformError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
+    use super::*;
     use tempfile::TempDir;
 
-    use super::{ClientKind, detect_client, resolve_install_target};
-
     #[test]
-    fn detects_openmohaa_only_when_its_client_is_present() {
-        let temporary = TempDir::new().expect("temporary directory");
-        assert_eq!(detect_client(temporary.path()), ClientKind::Retail);
+    fn selects_product_specific_retail_executable() {
+        let root = Path::new(r"C:\Games\MOHAA");
 
-        fs::write(temporary.path().join("openmohaa.exe"), []).expect("client marker");
-        assert_eq!(detect_client(temporary.path()), ClientKind::OpenMohaa);
+        assert_eq!(
+            default_client(root, TargetGame::AlliedAssault, ClientKind::Retail),
+            root.join("MOHAA.exe")
+        );
+        assert_eq!(
+            default_client(root, TargetGame::Spearhead, ClientKind::Retail),
+            root.join("moh_spearhead.exe")
+        );
+        assert_eq!(
+            default_client(root, TargetGame::Breakthrough, ClientKind::Retail),
+            root.join("moh_breakthrough.exe")
+        );
     }
 
     #[test]
-    fn writable_game_directory_is_preferred() {
-        let temporary = TempDir::new().expect("temporary directory");
-        let main = temporary.path().join("main");
-        fs::create_dir(&main).expect("main directory");
+    fn writable_install_directory_wins_without_a_fallback() {
+        let root = TempDir::new().expect("temporary install root");
+        fs::create_dir(root.path().join("main")).expect("game directory");
 
-        let target = resolve_install_target(temporary.path(), "main", ClientKind::Retail)
-            .expect("writable retail target");
+        let target = resolve_install_target(root.path(), "main", ClientKind::OpenMohaa)
+            .expect("writable target");
 
-        assert_eq!(target.game_directory, main);
+        assert_eq!(target.game_directory, root.path().join("main"));
         assert!(!target.used_home_fallback);
     }
 }

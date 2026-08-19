@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Write as _;
 use std::net::SocketAddrV4;
@@ -32,6 +33,26 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+    },
+    /// Run detection, browsing, preflight, map installation, and launch as one journey.
+    Journey {
+        /// Server to join after it appears in the browse pass.
+        server: SocketAddrV4,
+        /// User-selected fallback when registry discovery finds no installation.
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Game family to browse.
+        #[arg(long, value_enum, default_value_t = Game::AlliedAssault)]
+        game: Game,
+        /// Override automatically detected `OpenMoHAA` or retail launch behavior.
+        #[arg(long, value_enum)]
+        client_kind: Option<ClientFlavor>,
+        /// Override the client executable selected from the installation.
+        #[arg(long)]
+        client: Option<String>,
+        /// Launch when the final preflight is Compatible.
+        #[arg(long)]
+        execute: bool,
     },
     /// Identify an install and index its maps.
     Scan {
@@ -246,6 +267,24 @@ async fn main() {
 async fn run() -> Result<(), Box<dyn Error>> {
     match Arguments::parse().command {
         Command::Discover { format } => discover_windows(format),
+        Command::Journey {
+            server,
+            path,
+            game,
+            client_kind,
+            client,
+            execute,
+        } => {
+            run_journey(
+                server,
+                path.as_deref(),
+                game.into(),
+                client_kind.map(Into::into),
+                client,
+                execute,
+            )
+            .await
+        }
         Command::Scan { path, format } => scan(&path, format),
         Command::Browse {
             game,
@@ -312,6 +351,105 @@ async fn run() -> Result<(), Box<dyn Error>> {
             .await
         }
     }
+}
+
+async fn run_journey(
+    address: SocketAddrV4,
+    selected_path: Option<&Path>,
+    target: TargetGame,
+    client_kind: Option<windows::ClientKind>,
+    client_override: Option<String>,
+    execute: bool,
+) -> Result<(), Box<dyn Error>> {
+    let installation = detect_install(selected_path)?;
+    let client_kind = client_kind.unwrap_or_else(|| windows::detect_client(&installation.root));
+    println!("Install: {}", installation.root.display());
+    println!("Identification: {:?}", installation.identification);
+
+    let server = browse_journey_target(target, address).await?;
+    let profile = LaunchProfile::new(target);
+    let install_target =
+        windows::resolve_install_target(&installation.root, profile.data_directory(), client_kind)?;
+    if install_target.used_home_fallback {
+        println!(
+            "Downloaded maps will be kept in {}",
+            install_target.game_directory.display()
+        );
+    }
+
+    let index = MapIndex::scan(&install_target.game_directory)?;
+    let initial = reveille_core::join::classify_server(&index, &server, None);
+    println!("Preflight: {}", render_compatibility_state(&initial.state));
+    let wanted = initial
+        .preflight
+        .as_ref()
+        .map_or_else(Vec::new, wanted_maps);
+    let catalogue = if wanted.is_empty() {
+        None
+    } else {
+        Some(
+            content::MohDbClient::new(Duration::from_secs(15))?
+                .resolve_all(&wanted)
+                .await,
+        )
+    };
+
+    let install_non_results =
+        install_journey_content(catalogue.as_ref(), &server, &install_target.game_directory)
+            .await?;
+    for non_result in &install_non_results {
+        println!("Content non-result: {non_result}");
+    }
+
+    let updated_index = MapIndex::scan(&install_target.game_directory)?;
+    let final_assessment =
+        reveille_core::join::classify_server(&updated_index, &server, catalogue.as_ref());
+    println!(
+        "Final preflight: {}",
+        render_compatibility_state(&final_assessment.state)
+    );
+    let program = client_override.unwrap_or_else(|| {
+        windows::default_client(&installation.root, target, client_kind)
+            .to_string_lossy()
+            .into_owned()
+    });
+    let command = LaunchCommand::new(program, profile, FsGame::new("")?, address)?;
+    if execute && matches!(final_assessment.state, CompatibilityState::Compatible) {
+        let child = windows::launch_client(&command, client_kind)?;
+        println!("Launched client process {}", child.id());
+    } else if execute {
+        println!("Client not launched because maps are still unresolved.");
+    } else {
+        let arguments = command.arguments_for(client_kind.dialect());
+        println!(
+            "Launch ready: {}",
+            render_command_parts(&command.program, &arguments)
+        );
+    }
+    Ok(())
+}
+
+fn detect_install(selected_path: Option<&Path>) -> Result<install::Installation, Box<dyn Error>> {
+    if let Some(path) = selected_path {
+        return Ok(install::identify(path)?);
+    }
+    #[cfg(windows)]
+    {
+        let keys = reveille_core::platform::registry::read_live_hives()?;
+        let mut roots = reveille_core::platform::registry::discover_ea_install_roots(&keys)
+            .into_iter()
+            .map(|candidate| candidate.root)
+            .collect::<Vec<_>>();
+        if let Some(root) = reveille_core::platform::registry::discover_gog_install_root(&keys) {
+            roots.push(root);
+        }
+        for root in roots {
+            if let Ok(installation) = install::identify(root) {
+                return Ok(installation);
+            }
+        }
+    }
+    Err("No MOHAA installation was detected; pass --path once to select it.".into())
 }
 
 #[cfg(windows)]
@@ -459,6 +597,98 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn browse_journey_target(
+    target: TargetGame,
+    address: SocketAddrV4,
+) -> Result<discovery::Server, Box<dyn Error>> {
+    let report = discovery::browse(BrowseConfig {
+        target,
+        limit: None,
+        concurrency: 16,
+        master_timeout: Duration::from_secs(15),
+        probe_timeout: Duration::from_millis(2_500),
+    })
+    .await?;
+    let mut addresses = HashSet::new();
+    let servers = report
+        .outcomes
+        .iter()
+        .filter_map(|outcome| outcome.server.as_ref())
+        .filter(|server| {
+            addresses.insert(SocketAddrV4::new(
+                server.endpoint.address,
+                server.game_port.get(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    println!(
+        "Servers answering now: {} ({} recorded non-results)",
+        servers.len(),
+        report.summary().non_results
+    );
+    for server in &servers {
+        println!(
+            "  {}:{}  {}  {}",
+            server.endpoint.address,
+            server.game_port,
+            render_occupancy(server.occupancy, server.client_capacity),
+            server.hostname
+        );
+    }
+    servers
+        .into_iter()
+        .find(|server| {
+            SocketAddrV4::new(server.endpoint.address, server.game_port.get()) == address
+        })
+        .cloned()
+        .ok_or_else(|| format!("selected server {address} did not answer the browse pass").into())
+}
+
+async fn install_journey_content(
+    catalogue: Option<&content::CatalogueResolutionPass>,
+    server: &discovery::Server,
+    game_directory: &Path,
+) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut non_results = Vec::new();
+    let Some(catalogue) = catalogue else {
+        return Ok(non_results);
+    };
+    let client = content::MohDbClient::new(Duration::from_secs(30))?;
+    let staging = tempfile::TempDir::new()?;
+    for resolution in &catalogue.resolutions {
+        let ResolutionOutcome::Exact { name_match, .. } = &resolution.outcome else {
+            continue;
+        };
+        let result: Result<PathBuf, Box<dyn Error>> = async {
+            let archive =
+                content::download_mohdb_archive(&client, name_match, staging.path()).await?;
+            let inspection = content::inspect_archive(&archive.path)?;
+            let checksum = server
+                .current_map
+                .as_deref()
+                .filter(|current| {
+                    reveille_core::mapindex::MapKey::new(current)
+                        == Some(resolution.wanted.key.clone())
+                })
+                .and(server.map_checksum);
+            content::confirm_map(&inspection, &resolution.wanted.name, checksum)?;
+            Ok(content::install_archive(&archive, game_directory)?)
+        }
+        .await;
+        match result {
+            Ok(path) => println!("Installed {}", path.display()),
+            Err(error) => non_results.push(format!("{}: {error}", resolution.wanted.name)),
+        }
+    }
+    non_results.extend(
+        catalogue
+            .non_results
+            .iter()
+            .map(|result| format!("{}: catalogue {:?}", result.wanted.name, result.reason)),
+    );
+    Ok(non_results)
+}
+
 fn published_checksum(
     status: &discovery::FieldMap,
 ) -> Option<reveille_core::preflight::PublishedChecksum> {
@@ -548,8 +778,12 @@ fn render_join(
 }
 
 fn render_launch_command(command: &LaunchCommand) -> String {
-    std::iter::once(command.program.as_str())
-        .chain(command.arguments.iter().map(String::as_str))
+    render_command_parts(&command.program, &command.arguments)
+}
+
+fn render_command_parts(program: &str, arguments: &[String]) -> String {
+    std::iter::once(program)
+        .chain(arguments.iter().map(String::as_str))
         .map(shell_quote)
         .collect::<Vec<_>>()
         .join(" ")
@@ -910,11 +1144,13 @@ mod tests {
         BotsReported, ClientCapacity, ClientsReported, ReportedOccupancy, TargetGame,
     };
     use reveille_core::join::{
-        CompatibilityAssessment, CompatibilityState, FsGame, LaunchCommand, LaunchProfile,
+        CompatibilityAssessment, CompatibilityState, FsGame, LaunchCommand, LaunchDialect,
+        LaunchProfile,
     };
 
     use super::{
-        ClassifiedServer, render_compatibility_state, render_launch_command, render_occupancy,
+        ClassifiedServer, render_command_parts, render_compatibility_state, render_launch_command,
+        render_occupancy,
     };
 
     #[test]
@@ -952,6 +1188,23 @@ mod tests {
         assert_eq!(
             render_launch_command(&command),
             "'/opt/Open MOHAA/openmohaa' +set com_target_game 0 +set fs_game '' +connect 203.0.113.9:12203"
+        );
+    }
+
+    #[test]
+    fn renders_the_selected_retail_dialect_without_openmohaa_arguments() {
+        let command = LaunchCommand::new(
+            r"C:\Games\MOHAA\MOHAA.exe",
+            LaunchProfile::new(TargetGame::AlliedAssault),
+            FsGame::new("").expect("base game"),
+            SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 9), 12_203),
+        )
+        .expect("launch command");
+        let arguments = command.arguments_for(LaunchDialect::Retail);
+
+        assert_eq!(
+            render_command_parts(&command.program, &arguments),
+            r"'C:\Games\MOHAA\MOHAA.exe' +set fs_game '' +connect 203.0.113.9:12203"
         );
     }
 

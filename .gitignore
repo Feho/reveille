@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 /target/
+**/node_modules/
+crates/reveille-app/gen/
+crates/reveille-app/icons/
 *.log

@@ -413,12 +413,9 @@ assumption.
   aarch64 Linux, which the Windows machine cannot check. `crates/reveille-cli/src/windows.rs`
   compiles everywhere because it only uses portable `std`; `mod windows;` is not `cfg`-gated, so
   the name is misleading off-Windows, but nothing breaks.
-- **Open — `arguments_for` strips arguments by magic index.** `LaunchCommand::arguments_for`
-  returns `&self.arguments[3..]` for the retail dialect, which is positionally coupled to the
-  eight-element vector built in `LaunchCommand::new` with nothing enforcing the relationship.
-  Correct today; silently wrong the first time an argument is inserted before
-  `com_target_game`, and a panic path if the vector ever shortens. Build each dialect's vector
-  explicitly instead of slicing.
+- **Resolved in milestone 6 — launch dialects no longer share positional slicing.**
+  `LaunchCommand::arguments_for` now constructs each dialect explicitly. Retail cannot inherit
+  or lose an argument merely because the OpenMoHAA vector changes position or length.
 - **The corpus gap is not a blocker.** Seeding GOG and EA App hashes is an ongoing activity, not
   a Part B deliverable. `IdentificationMethod::RecognizedBinaryUnknownHashes` exists precisely so
   an unmeasured binary still identifies honestly, and the PRD states the corpus starts empty and
@@ -443,6 +440,25 @@ Report Part A complete on its own rather than holding the milestone open for the
 - Journeys A, B and C end to end.
 - **Working end to end on the owner's Windows machine.** That is v1's bar (decision, 19 Aug
   2026). Not packaged, not signed, not distributed.
+
+**Status: complete (19 Aug 2026).** `reveille journey` composes detection, identification, a
+complete live browse, preflight, catalogue resolution, safe archive installation, a rescan, and
+process launch in one command. The first live pass found 114 answering servers and 94 recorded
+non-results, classified `216.146.25.240:12203` as Compatible, and launched OpenMoHAA. A second
+pass exercised the content branch against `62.194.57.8:12205`: the server repeated
+`dm/aftermath` seven times in its rotation, exposing a real seam. Preflight now deduplicates by
+the engine-normalized map key, truthfully reports Needs 1 map, installed the exact verified
+`aftermath.pk3` into the probed writable `main` directory, rescanned to Compatible, and launched
+OpenMoHAA to the server. The browser also collapses duplicate authoritative game addresses from
+the master list.
+
+The Tauri shell links `reveille-core` directly and implements first-run detection/manual folder
+selection, the live server browser, and join preflight. It carries the four state names unchanged,
+sorts only by reported human clients, renders bots separately and additively, offers explicit
+choices without auto-applying an ambiguous result, records per-map failures, and displays the
+actual destination whenever OpenMoHAA falls back to `%APPDATA%\moh\main`. The development shell
+builds and opens on this Windows machine. Default tests remain offline: 66 pass and the three
+live network checks remain ignored; workspace clippy and fmt are clean.
 
 **Signing and distribution: deferred to shipping, by decision.** The chosen channels are winget
 and possibly the Microsoft Store, which is consistent with what the blueprint already argued —
@@ -475,9 +491,9 @@ and its three distinct resolution outcomes, and the 19 Aug population snapshot.
 
 ## Decisions still open
 
-Distribution channel and **code signing** — Codex's review argues signing is a ship gate for
-milestone 6, not a deferred decision. Maintainer model. The moh-db relationship: worth telling
-them, and worth asking for published digests and a `gameType` filter that filters.
+Maintainer model. The moh-db relationship: worth telling them, and worth asking for published
+digests and a `gameType` filter that filters. Distribution and signing are decided above; winget
+manifests and any Microsoft Store submission remain owner-run shipping work, outside v1.
 
 ## Follow-up, not blocking
 

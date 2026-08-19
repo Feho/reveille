@@ -2,6 +2,8 @@
 
 //! Compare a server rotation with locally indexed content.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 use crate::bsp::Checksum;
@@ -16,7 +18,7 @@ pub struct PublishedChecksum {
     pub checksum: Checksum,
 }
 
-/// Local status of one server rotation entry.
+/// Local status of one distinct server rotation map.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum MapStatus {
@@ -38,7 +40,7 @@ pub enum MapStatus {
     Absent,
 }
 
-/// Result for one normalized rotation entry.
+/// Result for one normalized, distinct rotation map.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct MapResult {
     /// Name as published by the server.
@@ -55,7 +57,7 @@ pub enum Verdict {
     Compatible,
     /// One or more maps are absent or have a checked checksum mismatch.
     ProblemsFound {
-        /// Number of absent rotation entries.
+        /// Number of distinct absent maps.
         absent: usize,
         /// Number of checked checksum mismatches.
         checksum_mismatches: usize,
@@ -67,7 +69,7 @@ pub enum Verdict {
 pub struct Report {
     /// Overall structured verdict.
     pub verdict: Verdict,
-    /// Per-rotation-entry details.
+    /// Per-map details, preserving the first spelling and order published by the server.
     pub maps: Vec<MapResult>,
 }
 
@@ -80,8 +82,10 @@ pub fn check(
 ) -> Report {
     let mut absent = 0;
     let mut checksum_mismatches = 0;
+    let mut seen = HashSet::new();
     let maps = rotation
         .iter()
+        .filter(|server_name| MapKey::new(server_name.as_ref()).is_none_or(|key| seen.insert(key)))
         .map(|server_name| {
             let server_name = server_name.as_ref();
             let local = index.get(server_name);
@@ -217,5 +221,29 @@ mod tests {
                 checksum_checked: false
             } if checksum == Checksum::new(42)
         ));
+    }
+
+    #[test]
+    fn repeated_rotation_entries_count_as_one_needed_map() {
+        let (_temporary, index) = fixture_index();
+        let rotation = [
+            "obj/missing",
+            "MAPS/OBJ/MISSING.BSP",
+            "obj/another",
+            "obj/missing",
+        ];
+
+        let report = check(&index, &rotation, None);
+
+        assert_eq!(
+            report.verdict,
+            Verdict::ProblemsFound {
+                absent: 2,
+                checksum_mismatches: 0,
+            }
+        );
+        assert_eq!(report.maps.len(), 2);
+        assert_eq!(report.maps[0].map, "obj/missing");
+        assert_eq!(report.maps[1].map, "obj/another");
     }
 }

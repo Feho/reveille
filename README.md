@@ -3,9 +3,29 @@
 # Reveille
 
 Reveille is a newcomer-first launcher for Medal of Honor: Allied Assault. The current
-implementation is the headless launcher foundation: it identifies existing asset trees,
-indexes maps using the engine's search-path precedence, preflights server rotations, resolves
-missing content, and constructs launch commands without executing them.
+Windows v1 identifies an existing installation, browses servers answering now, checks their
+map rotations, safely installs exact missing-map matches, and launches retail MOHAA or
+OpenMoHAA. The reusable pipeline lives in `reveille-core`; both the CLI proof and Tauri desktop
+shell call it directly.
+
+## Run the Windows app
+
+```console
+cargo run -p reveille-app
+```
+
+The development build is intentionally unpackaged and unsigned. Packaging, winget manifests,
+and Microsoft Store submission are shipping work outside v1.
+
+## Prove Journey B in one command
+
+```console
+cargo run -p reveille-cli -- journey 203.0.113.10:12203 --path "C:\Games\MOHAA" --execute
+```
+
+This detects and identifies the install, performs a complete live browse, preflights the chosen
+server, resolves and installs safe exact map matches, rescans, and launches only when the final
+check is Compatible. Omit `--execute` to leave the launch step as a printed command.
 
 ## Scan an install
 

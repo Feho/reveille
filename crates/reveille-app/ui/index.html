@@ -1,0 +1,100 @@
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reveille</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <button class="brand" data-go="browser" aria-label="Reveille home">
+          <span class="brand-mark">R</span>
+          <span><strong>REVEILLE</strong><small>Medal of Honor multiplayer</small></span>
+        </button>
+        <div id="install-pill" class="install-pill">Looking for your game…</div>
+      </header>
+
+      <main>
+        <section id="screen-first-run" class="screen first-run active">
+          <div class="welcome-copy">
+            <p class="eyebrow">WELCOME BACK TO THE FRONT</p>
+            <h1>Play Allied Assault<br />online again.</h1>
+            <p class="lead">Reveille finds active servers, checks their maps, and gets you ready before the game opens.</p>
+            <div class="promise-grid">
+              <div><span>01</span><strong>Find your game</strong><p>No registry archaeology.</p></div>
+              <div><span>02</span><strong>Pick a server</strong><p>Only servers answering now.</p></div>
+              <div><span>03</span><strong>Play</strong><p>Missing maps handled first.</p></div>
+            </div>
+          </div>
+          <div class="setup-card panel">
+            <div class="step-label">FIRST RUN</div>
+            <h2 id="setup-title">Finding Allied Assault…</h2>
+            <p id="setup-message" class="muted">Checking the usual Windows install locations.</p>
+            <div id="manual-path" class="manual-path hidden">
+              <label for="install-path">Where is Allied Assault installed?</label>
+              <div class="path-row">
+                <input id="install-path" autocomplete="off" placeholder="D:\Games\MOHAA" />
+                <button id="check-path" class="button secondary">Check folder</button>
+              </div>
+              <p class="hint">Choose the folder containing <code>main</code> and <code>MOHAA.exe</code> or <code>openmohaa.exe</code>.</p>
+            </div>
+            <div id="install-found" class="found hidden">
+              <span class="check">✓</span>
+              <div><strong>Your game is ready</strong><p id="found-path"></p></div>
+            </div>
+            <button id="continue-button" class="button primary wide hidden">See active servers <span>→</span></button>
+            <p id="setup-error" class="error" role="alert"></p>
+          </div>
+        </section>
+
+        <section id="screen-browser" class="screen browser">
+          <div class="browser-heading">
+            <div><p class="eyebrow">ALLIED ASSAULT</p><h1>Servers answering now</h1><p id="browser-summary" class="muted">Refresh to check the battlefield.</p></div>
+            <button id="refresh-servers" class="button primary">Refresh servers</button>
+          </div>
+          <div class="filter-bar panel">
+            <input id="server-filter" placeholder="Search server names" aria-label="Search servers" />
+            <div class="legend"><span class="dot compatible"></span>Compatible <span class="dot needs"></span>Needs maps <span class="dot unknown"></span>Can't tell</div>
+          </div>
+          <div class="server-table panel">
+            <div class="server-head"><span>SERVER</span><span>CLIENTS</span><span>MAP</span><span>CHECK</span><span></span></div>
+            <div id="server-list" class="server-list"><div class="empty">Press “Refresh servers” to begin.</div></div>
+          </div>
+          <p id="browser-error" class="error" role="alert"></p>
+        </section>
+
+        <section id="screen-join" class="screen join">
+          <button id="back-to-browser" class="back-button">← Back to servers</button>
+          <div id="join-content" class="join-layout">
+            <div class="join-hero panel">
+              <p class="eyebrow">JOIN CHECK</p>
+              <h1 id="join-server-name">Checking server…</h1>
+              <p id="join-server-meta" class="muted"></p>
+              <div id="state-card" class="state-card loading">
+                <span id="state-icon" class="state-icon">…</span>
+                <div><h2 id="state-title">Checking your maps</h2><p id="state-copy">This usually takes a moment.</p></div>
+              </div>
+              <div id="map-actions"></div>
+              <div id="fallback-note" class="fallback-note hidden"></div>
+              <button id="play-button" class="button primary wide hidden">Play now <span>→</span></button>
+              <p id="join-error" class="error" role="alert"></p>
+            </div>
+            <aside class="what-we-check panel">
+              <h3>What Reveille checked</h3>
+              <ul>
+                <li><span>✓</span> Server is answering now</li>
+                <li><span>✓</span> Game version and profile</li>
+                <li id="maps-check"><span>·</span> Maps used by this server</li>
+              </ul>
+              <p>“Compatible” means nothing Reveille can check is wrong. The server still makes the final decision.</p>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
