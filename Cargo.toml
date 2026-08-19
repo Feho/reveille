@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 [workspace]
-members = ["crates/reveille-core", "crates/reveille-cli", "crates/reveille-app"]
+members = [
+    "crates/reveille-core",
+    "crates/reveille-platform",
+    "crates/reveille-cli",
+    "crates/reveille-app",
+]
 resolver = "3"
 
 [workspace.package]

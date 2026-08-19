@@ -257,23 +257,15 @@ impl LaunchCommand {
         if program.is_empty() {
             return Err(LaunchError::EmptyProgram);
         }
-        let arguments = vec![
-            "+set".to_owned(),
-            "com_target_game".to_owned(),
-            profile.target_game_id().to_string(),
-            "+set".to_owned(),
-            "fs_game".to_owned(),
-            fs_game.as_str().to_owned(),
-            "+connect".to_owned(),
-            server.to_string(),
-        ];
-        Ok(Self {
+        let mut command = Self {
             program,
             profile,
             fs_game,
             server,
-            arguments,
-        })
+            arguments: Vec::new(),
+        };
+        command.arguments = command.arguments_for(LaunchDialect::OpenMohaa);
+        Ok(command)
     }
 
     /// Return the argument vector understood by the selected engine.
@@ -479,6 +471,10 @@ mod tests {
         .expect("launch command");
 
         assert_eq!(command.profile.data_directory(), "mainta");
+        assert_eq!(
+            command.arguments,
+            command.arguments_for(LaunchDialect::OpenMohaa)
+        );
         assert_eq!(
             command.arguments,
             [

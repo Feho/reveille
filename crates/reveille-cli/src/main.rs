@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Write as _;
 use std::net::SocketAddrV4;
@@ -15,9 +14,8 @@ use reveille_core::join::{
     CompatibilityAssessment, CompatibilityState, FsGame, LaunchCommand, LaunchProfile,
 };
 use reveille_core::mapindex::MapIndex;
+use reveille_platform as platform;
 use serde::Serialize;
-
-mod windows;
 
 #[derive(Debug, Parser)]
 #[command(name = "reveille", version, about = "Headless MOHAA launcher pipeline")]
@@ -167,7 +165,7 @@ enum ClientFlavor {
     Retail,
 }
 
-impl From<ClientFlavor> for windows::ClientKind {
+impl From<ClientFlavor> for platform::ClientKind {
     fn from(value: ClientFlavor) -> Self {
         match value {
             ClientFlavor::OpenMohaa => Self::OpenMohaa,
@@ -244,7 +242,7 @@ struct JoinRequest<'a> {
     fallback_target: TargetGame,
     fs_game_override: Option<String>,
     client: String,
-    client_kind: windows::ClientKind,
+    client_kind: platform::ClientKind,
     execute: bool,
     server_timeout: Duration,
     catalogue_timeout: Duration,
@@ -357,19 +355,22 @@ async fn run_journey(
     address: SocketAddrV4,
     selected_path: Option<&Path>,
     target: TargetGame,
-    client_kind: Option<windows::ClientKind>,
+    client_kind: Option<platform::ClientKind>,
     client_override: Option<String>,
     execute: bool,
 ) -> Result<(), Box<dyn Error>> {
     let installation = detect_install(selected_path)?;
-    let client_kind = client_kind.unwrap_or_else(|| windows::detect_client(&installation.root));
+    let client_kind = client_kind.unwrap_or_else(|| platform::detect_client(&installation.root));
     println!("Install: {}", installation.root.display());
     println!("Identification: {:?}", installation.identification);
 
     let server = browse_journey_target(target, address).await?;
     let profile = LaunchProfile::new(target);
-    let install_target =
-        windows::resolve_install_target(&installation.root, profile.data_directory(), client_kind)?;
+    let install_target = platform::resolve_install_target(
+        &installation.root,
+        profile.data_directory(),
+        client_kind,
+    )?;
     if install_target.used_home_fallback {
         println!(
             "Downloaded maps will be kept in {}",
@@ -409,13 +410,13 @@ async fn run_journey(
         render_compatibility_state(&final_assessment.state)
     );
     let program = client_override.unwrap_or_else(|| {
-        windows::default_client(&installation.root, target, client_kind)
+        platform::default_client(&installation.root, target, client_kind)
             .to_string_lossy()
             .into_owned()
     });
     let command = LaunchCommand::new(program, profile, FsGame::new("")?, address)?;
     if execute && matches!(final_assessment.state, CompatibilityState::Compatible) {
-        let child = windows::launch_client(&command, client_kind)?;
+        let child = platform::launch_client(&command, client_kind)?;
         println!("Launched client process {}", child.id());
     } else if execute {
         println!("Client not launched because maps are still unresolved.");
@@ -517,7 +518,7 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
         .unwrap_or(fallback_target);
     let profile = LaunchProfile::new(target);
     let install_target =
-        windows::resolve_install_target(install_root, profile.data_directory(), client_kind)?;
+        platform::resolve_install_target(install_root, profile.data_directory(), client_kind)?;
     let game_directory = install_target.game_directory;
     let index = MapIndex::scan(&game_directory)?;
     let rotation = status
@@ -557,7 +558,7 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
     };
     let launch = LaunchCommand::new(client, profile, FsGame::new(fs_game_value)?, server)?;
     let launched_process_id = execute
-        .then(|| windows::launch_client(&launch, client_kind))
+        .then(|| platform::launch_client(&launch, client_kind))
         .transpose()?
         .map(|child| child.id());
 
@@ -609,17 +610,10 @@ async fn browse_journey_target(
         probe_timeout: Duration::from_millis(2_500),
     })
     .await?;
-    let mut addresses = HashSet::new();
     let servers = report
         .outcomes
         .iter()
         .filter_map(|outcome| outcome.server.as_ref())
-        .filter(|server| {
-            addresses.insert(SocketAddrV4::new(
-                server.endpoint.address,
-                server.game_port.get(),
-            ))
-        })
         .collect::<Vec<_>>();
     println!(
         "Servers answering now: {} ({} recorded non-results)",

@@ -17,9 +17,8 @@ use reveille_core::join::{
     CompatibilityAssessment, CompatibilityState, FsGame, LaunchCommand, LaunchProfile,
 };
 use reveille_core::mapindex::{MapIndex, MapKey};
+use reveille_platform as platform;
 use serde::Serialize;
-
-mod platform;
 
 #[derive(Default)]
 struct AppState {
@@ -105,17 +104,10 @@ async fn browse_servers(
     })
     .await
     .map_err(|error| error.to_string())?;
-    let mut addresses = HashSet::new();
     let mut servers = report
         .outcomes
         .iter()
         .filter_map(|outcome| outcome.server.clone())
-        .filter(|server| {
-            addresses.insert(SocketAddrV4::new(
-                server.endpoint.address,
-                server.game_port.get(),
-            ))
-        })
         .collect::<Vec<_>>();
     servers.sort_by_key(|server| {
         std::cmp::Reverse(

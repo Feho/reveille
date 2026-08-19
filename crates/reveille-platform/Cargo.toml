@@ -1,25 +1,18 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 [package]
-name = "reveille-cli"
+name = "reveille-platform"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "reveille"
-path = "src/main.rs"
-
 [dependencies]
-clap.workspace = true
 reveille-core = { path = "../reveille-core" }
-reveille-platform = { path = "../reveille-platform" }
-serde.workspace = true
-serde_json.workspace = true
-tempfile.workspace = true
-tokio.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

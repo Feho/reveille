@@ -2,6 +2,7 @@
 
 //! Bounded network orchestration. Per-server failures become data, not sweep errors.
 
+use std::collections::HashSet;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
@@ -103,7 +104,7 @@ pub enum DiscoveryError {
 /// # Errors
 ///
 /// Returns an error only when the master list cannot be obtained or an internal task panics.
-/// Unreachable and malformed individual servers are retained in the returned report.
+/// Unreachable, malformed, and duplicate individual registrations are retained in the report.
 pub async fn browse(config: BrowseConfig) -> Result<BrowseReport, DiscoveryError> {
     let endpoints = fetch_master(config.target, config.master_timeout)
         .await
@@ -130,13 +131,33 @@ pub async fn browse(config: BrowseConfig) -> Result<BrowseReport, DiscoveryError
         };
         outcomes.push(result?);
     }
-    outcomes.sort_by_key(|outcome| outcome.endpoint);
+    record_duplicate_game_endpoints(&mut outcomes);
 
     Ok(BrowseReport {
         target: config.target,
         registered,
         outcomes,
     })
+}
+
+fn record_duplicate_game_endpoints(outcomes: &mut [ProbeOutcome]) {
+    outcomes.sort_by_key(|outcome| outcome.endpoint);
+    let mut seen = HashSet::new();
+    for outcome in outcomes {
+        let Some(server) = outcome.server.as_ref() else {
+            continue;
+        };
+        let key = (server.endpoint.address, server.game_port);
+        if seen.insert(key) {
+            continue;
+        }
+        let game_port = server.game_port;
+        outcome.server = None;
+        outcome.non_result = Some(NonResult {
+            stage: ProbeStage::EndpointDeduplication,
+            reason: NonResultReason::DuplicateEndpoint { game_port },
+        });
+    }
 }
 
 /// Send MOHAA `getstatus` with the required five-byte directional header.
@@ -401,8 +422,95 @@ impl From<RequestError> for NonResultReason {
 mod tests {
     use std::net::Ipv4Addr;
 
-    use super::{build_server, game_port_from_gamespy};
-    use crate::discovery::{FieldMap, MasterEndpoint, QueryPort};
+    use super::{build_server, game_port_from_gamespy, record_duplicate_game_endpoints};
+    use crate::discovery::{
+        BrowseReport, FieldMap, GamePort, MasterEndpoint, NonResultReason, ProbeOutcome,
+        ProbeStage, QueryPort, TargetGame,
+    };
+
+    fn complete_outcome(query_port: u16, game_port: u16) -> ProbeOutcome {
+        let endpoint = MasterEndpoint {
+            address: Ipv4Addr::new(203, 0, 113, 7),
+            query_port: QueryPort::new(query_port),
+        };
+        let gamespy = FieldMap::from([
+            ("hostport".to_owned(), game_port.to_string()),
+            ("numplayers".to_owned(), "3".to_owned()),
+        ]);
+        let server = build_server(
+            endpoint,
+            GamePort::new(game_port),
+            &gamespy,
+            &FieldMap::new(),
+        );
+        ProbeOutcome {
+            endpoint,
+            gamespy_reachable: true,
+            server: Some(server),
+            non_result: None,
+        }
+    }
+
+    #[test]
+    fn records_later_master_registration_for_one_game_endpoint_as_duplicate() {
+        let mut outcomes = vec![
+            complete_outcome(12_301, 12_203),
+            complete_outcome(12_300, 12_203),
+        ];
+
+        record_duplicate_game_endpoints(&mut outcomes);
+
+        let report = BrowseReport {
+            target: TargetGame::AlliedAssault,
+            registered: 2,
+            outcomes,
+        };
+        let summary = report.summary();
+
+        assert_eq!(summary.registered, 2);
+        assert_eq!(summary.inspected, 2);
+        assert_eq!(summary.getstatus_reachable, 1);
+        assert_eq!(summary.clients_reported, 3);
+        assert_eq!(summary.non_results, 1);
+        assert_eq!(
+            report.outcomes[0].endpoint.query_port,
+            QueryPort::new(12_300)
+        );
+        assert!(report.outcomes[0].server.is_some());
+        assert!(report.outcomes[0].non_result.is_none());
+        assert!(report.outcomes[1].server.is_none());
+        assert_eq!(
+            report.outcomes[1]
+                .non_result
+                .as_ref()
+                .map(|result| (&result.stage, &result.reason)),
+            Some((
+                &ProbeStage::EndpointDeduplication,
+                &NonResultReason::DuplicateEndpoint {
+                    game_port: GamePort::new(12_203),
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn preserves_distinct_game_ports_on_one_address() {
+        let mut outcomes = vec![
+            complete_outcome(12_300, 12_203),
+            complete_outcome(12_301, 12_204),
+        ];
+
+        record_duplicate_game_endpoints(&mut outcomes);
+
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| outcome.server.is_some())
+                .count(),
+            2
+        );
+        assert!(outcomes.iter().all(|outcome| outcome.non_result.is_none()));
+    }
 
     #[test]
     fn uses_hostport_data_without_deriving_from_the_query_port() {

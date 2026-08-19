@@ -6,7 +6,8 @@ Reveille is a newcomer-first launcher for Medal of Honor: Allied Assault. The cu
 Windows v1 identifies an existing installation, browses servers answering now, checks their
 map rotations, safely installs exact missing-map matches, and launches retail MOHAA or
 OpenMoHAA. The reusable pipeline lives in `reveille-core`; both the CLI proof and Tauri desktop
-shell call it directly.
+shell call it directly, while `reveille-platform` holds their shared Windows write-target and
+process-launch policy.
 
 ## Run the Windows app
 

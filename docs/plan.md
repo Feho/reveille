@@ -449,8 +449,8 @@ pass exercised the content branch against `62.194.57.8:12205`: the server repeat
 `dm/aftermath` seven times in its rotation, exposing a real seam. Preflight now deduplicates by
 the engine-normalized map key, truthfully reports Needs 1 map, installed the exact verified
 `aftermath.pk3` into the probed writable `main` directory, rescanned to Compatible, and launched
-OpenMoHAA to the server. The browser also collapses duplicate authoritative game addresses from
-the master list.
+OpenMoHAA to the server. The shared discovery pass now records later duplicate authoritative
+game endpoints as non-results rather than letting any surface double-count them.
 
 The Tauri shell links `reveille-core` directly and implements first-run detection/manual folder
 selection, the live server browser, and join preflight. It carries the four state names unchanged,
@@ -514,30 +514,28 @@ Linux build of a crate that is Windows-only for v1, at the cost of an apt step t
 Both jobs are green on `b99eac8`, so the Tauri shell is now built by CI on Windows and not only
 on the owner's machine.
 
-**Open — the same rule is hand-rolled in three places, and one copy is missing.** Endpoint dedup
-on `(address, game_port)` — the right key, since `hostport` is authoritative and multi-instance
-hosts stay distinct — appears in `reveille-cli` `browse_journey_target` and in `reveille-app`
-`browse_servers`, but **not** in the CLI's own `browse` subcommand or in `classify_browse_report`.
-So the one surface that produced the published classification figures is the one that still
-double-counts a duplicate registration. The fix is to dedup inside `discovery::browse` so a
-`BrowseReport` cannot contain two outcomes for one game endpoint, then delete all three
-caller-side copies. Note the provenance rather than re-running a sweep: the master churns by more
-than the effect.
+**Resolved after review — duplicate registrations remain evidence without inflating servers.**
+`discovery::browse` sorts by master endpoint, retains the first complete result for each
+authoritative `(address, game_port)`, and demotes each later one to a recorded
+`DuplicateEndpoint { game_port }` non-result. `registered`, `inspected`, and the duplicate's
+parseable GameSpy reply remain visible; every figure derived from complete servers now counts the
+game endpoint once. Different game ports on one address remain distinct. Both caller-side
+filters were deleted, so the CLI browse, journey, aggregate classification, and app all consume
+the same invariant.
 
-**Open — `arguments_for` traded a magic index for a copy-paste twin.** `LaunchCommand::new` still
-builds `self.arguments` from the same eight literals the `OpenMohaa` branch now rebuilds, so
-there are two sources of truth for one vector: serialization reads the field, launching reads the
-method. Construct the command, then set `arguments` from
-`arguments_for(LaunchDialect::OpenMohaa)`, or drop the field and serialize through the method.
+**Resolved after review — OpenMoHAA arguments have one source of truth.**
+`LaunchCommand::new` first constructs the typed command and then derives the serialized/display
+`arguments` field through `arguments_for(LaunchDialect::OpenMohaa)`. The invariant has an explicit
+test, while the retail dialect remains independently tested.
 
-**Open — the Windows platform layer is duplicated across two crates.**
-`crates/reveille-app/src/platform.rs` and `crates/reveille-cli/src/windows.rs` are 187 and 185
-lines of near-identical `detect_client`, `default_client`, `resolve_install_target`,
-`probe_writable` and `launch_client`. Their **tests diverge**: the app copy tests retail
-executable selection but not `detect_client`; the CLI copy tests `detect_client` but not
-executable selection. Each copy is therefore half-covered and a fix to one will not reach the
-other. This is platform policy, so it does not belong in `reveille-core` — it wants a fourth
-crate both binaries depend on.
+**Resolved after review — Windows policy is shared without entering `reveille-core`.** The new
+`reveille-platform` crate owns client detection, product-specific executable selection, probed
+install-target resolution, and process launch. Both executable crates depend on it; their two
+partial test sets were merged and extended. Filesystem mutation and process spawning are gated
+inside the crate for Windows, while an explicit unsupported result keeps the portable CLI
+buildable on other targets. The Windows workspace now has 67 passing default tests with the
+three live network checks still ignored; the locked portable package selection runs 64 of those
+tests. Workspace and portable clippy, fmt, and the shell's JavaScript syntax check are clean.
 
 **Verified as sound — the indexed install and the launched binary are the same install.** Both
 `build_preview` and `install_and_launch` derive from a single `install::identify(path)`, so the

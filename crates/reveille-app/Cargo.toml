@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 reveille-core = { path = "../reveille-core" }
+reveille-platform = { path = "../reveille-platform" }
 serde.workspace = true
 tauri = { version = "2", features = [] }
 tempfile.workspace = true

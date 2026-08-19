@@ -2720,6 +2720,7 @@ name = "reveille-app"
 version = "0.1.0"
 dependencies = [
  "reveille-core",
+ "reveille-platform",
  "serde",
  "tauri",
  "tauri-build",
@@ -2734,6 +2735,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "reveille-core",
+ "reveille-platform",
  "serde",
  "serde_json",
  "tempfile",
@@ -2756,6 +2758,15 @@ dependencies = [
  "walkdir",
  "winreg 0.56.0",
  "zip",
+]
+
+[[package]]
+name = "reveille-platform"
+version = "0.1.0"
+dependencies = [
+ "reveille-core",
+ "tempfile",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

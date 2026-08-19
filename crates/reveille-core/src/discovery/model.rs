@@ -235,7 +235,7 @@ pub struct Server {
     pub pure: Option<String>,
 }
 
-/// Network/protocol stage at which one server stopped producing useful data.
+/// Stage at which one master registration became a recorded non-result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeStage {
@@ -245,6 +245,8 @@ pub enum ProbeStage {
     HostPort,
     /// MOHAA out-of-band `getstatus` on the authoritative game port.
     GetStatus,
+    /// Removal of a later master registration for an already-recorded authoritative endpoint.
+    EndpointDeduplication,
 }
 
 /// Why one registered server did not yield a complete model.
@@ -265,12 +267,17 @@ pub enum NonResultReason {
     },
     /// `GameSpy` answered without a usable `hostport`.
     MissingHostPort,
+    /// A previous master registration already resolved to this authoritative game endpoint.
+    DuplicateEndpoint {
+        /// Authoritative game port shared with the retained server.
+        game_port: GamePort,
+    },
 }
 
 /// Recorded partial-result reason for a registered server.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct NonResult {
-    /// Stage that could not complete.
+    /// Network or post-probe stage responsible for this non-result.
     pub stage: ProbeStage,
     /// Structured reason; this never aborts the surrounding sweep.
     pub reason: NonResultReason,
@@ -285,7 +292,7 @@ pub struct ProbeOutcome {
     pub gamespy_reachable: bool,
     /// Complete server model when out-of-band status also succeeded.
     pub server: Option<Server>,
-    /// Recorded reason when inspection stopped early.
+    /// Recorded reason when inspection stopped early or a duplicate complete result was demoted.
     pub non_result: Option<NonResult>,
 }
 
