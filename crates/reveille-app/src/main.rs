@@ -219,6 +219,18 @@ async fn browse_servers(
         .map_err(|error| error.to_string())?;
     let index = MapIndex::scan(&target.game_directory).map_err(|error| error.to_string())?;
 
+    // A stop pressed just as the previous sweep ended leaves a permit behind, which would cancel
+    // this one before it probed anything. Consume it: polling `notified` once resolves immediately
+    // when a permit is stored and times out otherwise.
+    drop(tokio::time::timeout(Duration::ZERO, state.cancel_browse.notified()).await);
+    // Rows are offered to the player as they stream, so a join prepared mid-sweep must be able to
+    // find its server. The list is rebuilt from the authoritative report when the sweep ends.
+    state
+        .servers
+        .lock()
+        .map_err(|_| "server list state is unavailable".to_owned())?
+        .clear();
+
     let (sink, mut events) = mpsc::channel(64);
     let sweep = tokio::spawn(discovery::browse_streaming(
         BrowseConfig {
@@ -231,51 +243,7 @@ async fn browse_servers(
         sink,
     ));
 
-    let mut progress = BrowseProgress {
-        registered: 0,
-        inspected: 0,
-        probed: 0,
-        answered: 0,
-        non_results: 0,
-        row: None,
-    };
-    let mut cancelled = false;
-    loop {
-        let event = tokio::select! {
-            event = events.recv() => event,
-            () = state.cancel_browse.notified() => {
-                cancelled = true;
-                None
-            }
-        };
-        let Some(event) = event else {
-            break;
-        };
-        match event {
-            BrowseEvent::Registered {
-                registered,
-                inspected,
-            } => {
-                progress.registered = registered;
-                progress.inspected = inspected;
-                progress.row = None;
-            }
-            BrowseEvent::Outcome(outcome) => {
-                progress.probed += 1;
-                progress.row = outcome
-                    .server
-                    .as_ref()
-                    .map(|server| classified(server, &index));
-                if progress.row.is_some() {
-                    progress.answered += 1;
-                } else {
-                    progress.non_results += 1;
-                }
-            }
-        }
-        // A frontend that stopped listening is not an error; the sweep result is still worth having.
-        drop(app.emit(BROWSE_EVENT, progress.clone()));
-    }
+    let cancelled = stream_sweep(&app, &state, &index, &mut events).await?;
     // Dropping the receiver is what stops the sweep. It returns what it already inspected.
     drop(events);
 
@@ -317,6 +285,66 @@ async fn browse_servers(
         ),
         cancelled,
     })
+}
+
+/// Relay sweep events to the frontend until the sweep ends or the player stops it.
+///
+/// Answered servers land in the shared list as they arrive, because a player can select a row while
+/// the sweep is still running and preparing that join has to be able to find the server.
+///
+/// Returns whether the sweep was stopped early.
+async fn stream_sweep(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, AppState>,
+    index: &MapIndex,
+    events: &mut mpsc::Receiver<BrowseEvent>,
+) -> Result<bool, String> {
+    let mut progress = BrowseProgress {
+        registered: 0,
+        inspected: 0,
+        probed: 0,
+        answered: 0,
+        non_results: 0,
+        row: None,
+    };
+    loop {
+        let event = tokio::select! {
+            event = events.recv() => event,
+            () = state.cancel_browse.notified() => return Ok(true),
+        };
+        let Some(event) = event else {
+            return Ok(false);
+        };
+        match event {
+            BrowseEvent::Registered {
+                registered,
+                inspected,
+            } => {
+                progress.registered = registered;
+                progress.inspected = inspected;
+                progress.row = None;
+            }
+            BrowseEvent::Outcome(outcome) => {
+                progress.probed += 1;
+                progress.row = outcome
+                    .server
+                    .as_ref()
+                    .map(|server| classified(server, index));
+                if let Some(server) = outcome.server {
+                    progress.answered += 1;
+                    state
+                        .servers
+                        .lock()
+                        .map_err(|_| "server list state is unavailable".to_owned())?
+                        .push(server);
+                } else {
+                    progress.non_results += 1;
+                }
+            }
+        }
+        // A frontend that stopped listening is not an error; the sweep result is still worth having.
+        drop(app.emit(BROWSE_EVENT, progress.clone()));
+    }
 }
 
 fn classified(server: &Server, index: &MapIndex) -> BrowserServer {

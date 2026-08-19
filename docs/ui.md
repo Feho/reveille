@@ -125,7 +125,7 @@ as `Playable` / `Missing` / `Unknown`, independently of the rotation verdict. `l
 
 - `Compatible` → launch, no consent needed.
 - Current map `Missing` → **refuse, even with consent.** The connection would be dropped on arrival.
-- Anything else → launch **only** with explicit consent.
+- Anything else → launch **only** with consent (`accept_incomplete`).
 
 A server with one unobtainable map later in its rotation is perfectly playable until the rotation
 reaches it. Refusing that join would invent a problem the engine does not have; the honest thing is
@@ -141,13 +141,25 @@ missing *and* the catalogue has no source for it (`currentMapFetchable` in `view
 lines the server's `mapname` up with its rotation entry using the engine normalisation from
 `format.js`). When the running map is in the shopping list, downloading is precisely the fix, and
 disabling the button would strand the player on the one screen that could have solved it — the
-action bar says so instead: *"X is running now and is not on disk. It is in the files below, so
-fetching them is what makes this join work."* When candidates exist but none is chosen, it asks for
-the choice rather than refusing.
+action bar says so instead: *"X is running now and is not on disk. Fetching is what makes this join
+work."* When candidates exist but none is chosen, it asks for the choice rather than refusing.
 
-Consent is a real, visible toggle ("Join without a rotation check" / "Join anyway, knowing a map is
-missing"), never inferred. The previous implementation set it silently from the state, so a player
-could launch an unchecked join without ever being told.
+**Consent is the click on the primary button, and the label is what makes it informed.** There is
+one control, and it names what this join is missing:
+
+| Situation | Label | `accept_incomplete` |
+|---|---|---|
+| `Compatible` | `Join` | `false` |
+| Anything to fetch | `Get 9.1 MB & join` | `true` |
+| `Can't tell` | `Join without a rotation check` | `true` |
+| Nothing fetchable left | `Join anyway` | `true` |
+
+An earlier version put a separate confirmation toggle in front of the button. It was two clicks for
+one answer: the state name sits directly above the button and the label already states the cost, so
+the toggle asked the player to agree to something they had just read and were about to act on. What
+must never happen is the *silent* inference the first implementation did — deriving the flag from
+the state with no label change, so a player launched an unchecked join without being told. The label
+is the telling.
 
 ## 6. Visual system
 
@@ -230,6 +242,23 @@ not reintroduce a blanket rebuild of any region containing a text input.**
 
 Plain language, no jargon, no exclamation marks, and never a claim the protocol cannot support.
 Say what was checked, what was not, and what happens next.
+
+**Honesty is a constraint on claims, not a licence to explain.** The first version of this interface
+satisfied every rule below and was still wrong: it argued its reasoning at the player. Every list
+had a paragraph justifying it, every server carried the same standing note about bans and capacity,
+every ambiguous match re-explained the no-auto-apply policy. None of that changes what a player does
+next, and the volume buried the two or three lines that do.
+
+The rule: **an explanation earns a paragraph only if it changes the next click.** Otherwise it is a
+`title` attribute on the thing it explains, or it is not in the interface at all.
+
+- A caveat that is true of every server (bans, capacity, ping) belongs in the docs, not on every
+  row. State it once at the moment it applies — after launch, not before every join.
+- A group heading plus its data usually says enough. "Needs your choice" over two candidate rows
+  with sizes and download counts needs no prose; the policy behind it is the heading's tooltip.
+- A ready server says nothing. Silence is the correct rendering of "nothing to do".
+- Prefer the shorter true sentence. "Publishes no map checksum, so only names are matched, not
+  files" beats the same fact in three clauses.
 
 - Say "clients", never "players".
 - Say "did not answer", not "offline" — we know the former, not the latter.

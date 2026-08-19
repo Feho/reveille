@@ -54,11 +54,7 @@ function idlePlaceholder() {
     "div",
     { className: "placeholder" },
     el("h3", null, "No server selected"),
-    el(
-      "p",
-      null,
-      "Pick a server to see what it is running, what its rotation needs, and exactly what Reveille would fetch before you join.",
-    ),
+    el("p", null, "Pick one to see what it needs."),
   );
 }
 
@@ -128,8 +124,11 @@ function verdictSection(assessment, preview) {
     "div",
     { className: "detail__section" },
     el("p", { className: "label" }, "Join check"),
-    el("h3", { className: "display heading-sm" }, stateName(assessment.state)),
-    el("p", { className: "quiet" }, stateExplanation(assessment.state)),
+    el(
+      "h3",
+      { className: "display heading-sm", title: stateExplanation(assessment.state) },
+      stateName(assessment.state),
+    ),
     resolving ? resolvingMeter() : null,
     totals && totals.count > 0
       ? el(
@@ -177,11 +176,7 @@ function rotationSection(row, assessment, preview) {
       "div",
       { className: "detail__section" },
       el("p", { className: "label" }, "Rotation"),
-      el(
-        "p",
-        { className: "quiet" },
-        "This server publishes no map list. Reveille shows silence as silence rather than turning it into a green tick.",
-      ),
+      el("p", { className: "quiet" }, "This server publishes no map list."),
     );
   }
 
@@ -236,21 +231,23 @@ function rotationSection(row, assessment, preview) {
         : null,
       choose.length
         ? group(
-            "Needs your choice",
+            groupTitle(
+              "Needs your choice",
+              "The catalogue files these under a different name. Reveille never picks for you, and checks the archive contents after downloading.",
+            ),
             choose.map((resolution) => choiceBlock(resolution)),
           )
         : null,
       none.length
         ? group(
-            "No source",
+            groupTitle(
+              "No source",
+              "You can play here until the rotation reaches these maps, then you are dropped.",
+            ),
             none.map((resolution) =>
               frag(
                 line("✕", "none", mapName(resolution.wanted.name), "—"),
-                el(
-                  "p",
-                  { className: "rot__file" },
-                  "Not in the catalogue. You can still play here; you will be dropped when the rotation reaches this map.",
-                ),
+                el("p", { className: "rot__file" }, "Not in any catalogue Reveille can reach."),
               ),
             ),
           )
@@ -273,12 +270,18 @@ function rotationSection(row, assessment, preview) {
 }
 
 function group(title, ...children) {
+  const [text, hint] = Array.isArray(title) ? title : [title, null];
   return el(
     "div",
     { className: "rot__group" },
-    el("p", { className: "label group-title" }, title),
+    el("p", { className: "label group-title", title: hint }, text),
     children,
   );
+}
+
+/** A group heading whose explanation is a tooltip rather than a paragraph. */
+function groupTitle(text, hint) {
+  return [text, hint];
 }
 
 function line(mark, kind, name, trailing) {
@@ -322,11 +325,6 @@ function choiceBlock(resolution) {
             ),
           ),
         ),
-      ),
-      el(
-        "p",
-        { className: "quiet" },
-        "The catalogue files this map under a different name, so Reveille will not pick for you. It checks the archive contents after downloading and tells you if the choice was wrong.",
       ),
     ),
   );
@@ -394,7 +392,7 @@ function outcomeSection(result) {
       "p",
       { className: "quiet" },
       launched
-        ? "Allied Assault is connecting now. Bans, a full server and ping limits are decided by the server at this point — Reveille cannot check those in advance."
+        ? "Allied Assault is connecting. Bans, a full server and ping limits are the server's call from here."
         : result.outcome.reason,
     ),
     result.installed.length
@@ -441,12 +439,10 @@ function outcomeSection(result) {
 function warnings(server) {
   const notes = [];
   if (server.allow_download === 0) {
-    notes.push("This server will not send you files. Anything missing has to be here before you join.");
+    notes.push("Sends no files — anything missing has to be here before you join.");
   }
   if (server.map_checksum === null || server.map_checksum === undefined) {
-    notes.push(
-      "This server publishes no map checksum, so an exact-file match cannot be confirmed in advance — only the map name.",
-    );
+    notes.push("Publishes no map checksum, so only names are matched, not files.");
   }
   if (!notes.length) return null;
   return el(
@@ -454,12 +450,6 @@ function warnings(server) {
     { className: "detail__section" },
     el("p", { className: "label" }, "Worth knowing"),
     notes.map((note) => el("p", { className: "quiet" }, note)),
-    el(
-      "p",
-      { className: "note" },
-      el("strong", null, "Bans, kicks and a full server "),
-      "are decided when you actually connect. Nothing queried beforehand can rule them out, so Reveille does not imply it has.",
-    ),
   );
 }
 
@@ -518,7 +508,7 @@ function actionBar(row, onJoin) {
       el(
         "p",
         { className: "note note--bad" },
-        `This server is running ${mapName(currentMap)}, which is not on disk and is not in the catalogue. Joining now would drop you immediately.`,
+        `${mapName(currentMap)} is running now, is not on disk, and is not in the catalogue. Joining would drop you immediately.`,
       ),
       el(
         "button",
@@ -528,17 +518,13 @@ function actionBar(row, onJoin) {
     ];
   }
 
-  const needsConsent = kind !== "compatible";
-  const blocked = needsConsent && !state.acceptIncomplete;
   const rows = [];
-
   if (readiness === "missing" && fetchable === "yes") {
     rows.push(
       el(
         "p",
         { className: "note note--brass" },
-        el("strong", null, `${mapName(currentMap)} is running now and is not on disk. `),
-        "It is in the files below, so fetching them is what makes this join work.",
+        `${mapName(currentMap)} is running now and is not on disk. Fetching is what makes this join work.`,
       ),
     );
   } else if (readiness === "missing" && fetchable === "choose") {
@@ -546,20 +532,16 @@ function actionBar(row, onJoin) {
       el(
         "p",
         { className: "note note--brass" },
-        el("strong", null, `${mapName(currentMap)} is running now and is not on disk. `),
-        "Pick a source for it above and Reveille will fetch it with the rest.",
+        `${mapName(currentMap)} is running now and is not on disk. Pick a source for it above.`,
       ),
     );
-  }
-  if (needsConsent) {
-    rows.push(consentToggle(kind, totals));
   }
   if (totals.pending > 0) {
     rows.push(
       el(
         "p",
         { className: "quiet" },
-        `${totals.pending} ${totals.pending === 1 ? "map still needs" : "maps still need"} a choice above. Reveille never picks an ambiguous match for you.`,
+        `${totals.pending} ${totals.pending === 1 ? "map needs" : "maps need"} a choice above.`,
       ),
     );
   }
@@ -572,11 +554,13 @@ function actionBar(row, onJoin) {
         {
           type: "button",
           className: "btn btn--primary",
-          disabled: busy || resolving || blocked,
+          disabled: busy || resolving,
           dataset: { focusKey: "join" },
-          onclick: () => onJoin(row),
+          // Consent is the click. The label names what this join is missing, so a
+          // separate confirmation toggle would only add a step to the same answer.
+          onclick: () => onJoin(row, kind !== "compatible"),
         },
-        busy ? "Working…" : totals.count > 0 ? `Get ${bytes(totals.size)} & join` : "Join",
+        busy ? "Working…" : joinLabel(kind, totals),
       ),
     ),
   );
@@ -584,6 +568,14 @@ function actionBar(row, onJoin) {
     rows.push(el("p", { className: "error", role: "alert" }, state.joinError));
   }
   return rows;
+}
+
+/** The primary button's label, which is also the consent it records. */
+function joinLabel(kind, totals) {
+  if (totals.count > 0) return `Get ${bytes(totals.size)} & join`;
+  if (kind === "compatible") return "Join";
+  if (kind === "cant_tell") return "Join without a rotation check";
+  return "Join anyway";
 }
 
 /**
@@ -605,27 +597,4 @@ function currentMapFetchable(preview, currentMap) {
   if (resolution.outcome === "exact") return "yes";
   if (resolution.outcome === "no_source") return "no";
   return state.choices.has(resolution.wanted.name) ? "yes" : "choose";
-}
-
-function consentToggle(kind, totals) {
-  const label =
-    kind === "cant_tell"
-      ? "Join without a rotation check"
-      : kind === "no_source"
-        ? "Join anyway, knowing a map is missing"
-        : totals.count > 0
-          ? "Join after fetching what is missing"
-          : "Join without everything the rotation needs";
-  return el(
-    "button",
-    {
-      type: "button",
-      className: "toggle",
-      "aria-pressed": state.acceptIncomplete ? "true" : "false",
-      dataset: { focusKey: "accept-incomplete" },
-      onclick: () => update((next) => (next.acceptIncomplete = !next.acceptIncomplete)),
-    },
-    el("span", { className: "toggle__box", "aria-hidden": "true" }, "✓"),
-    label,
-  );
 }

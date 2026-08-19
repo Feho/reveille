@@ -43,7 +43,7 @@ const view = {
   candidate: null,
   /** Why this screen is showing: boot, or the player asking to change folders. */
   eyebrow: "First run",
-  message: "Checking the usual install locations.",
+  message: "Checking the usual locations.",
   busy: true,
   error: null,
   manualPath: "",
@@ -90,7 +90,7 @@ function card(render, onReady) {
               className: "btn btn--ghost",
               onclick: () => {
                 view.candidate = null;
-                view.message = "Point Reveille at the folder that holds main and the game client.";
+                view.message = "Pick your game folder.";
                 render();
               },
             },
@@ -98,11 +98,6 @@ function card(render, onReady) {
           ),
         ),
       view.error && el("p", { className: "error", role: "alert" }, view.error),
-      el(
-        "p",
-        { className: "quiet" },
-        "Reveille reads the files rather than trusting the registry, so a moved or copied folder still resolves.",
-      ),
     ),
   );
 }
@@ -125,7 +120,11 @@ function foundBlock(install) {
       "div",
       { className: "row-between" },
       el("p", { className: "setup__path" }, displayPath(install.root)),
-      el("span", { className: `chip ${identification.kind}` }, identification.chip),
+      el(
+        "span",
+        { className: `chip ${identification.kind}`, title: identification.detail },
+        identification.chip,
+      ),
     ),
     el(
       "dl",
@@ -146,14 +145,8 @@ function foundBlock(install) {
           : "none found",
       ),
     ),
-    el("p", { className: "quiet" }, identification.detail),
     products.length > 1 &&
-      el(
-        "p",
-        { className: "note" },
-        el("strong", null, "Expansions are detected and left alone. "),
-        "Reveille v1 handles Allied Assault only — the expansions run a different protocol and a separate server population.",
-      ),
+      el("p", { className: "quiet" }, "Reveille v1 handles Allied Assault only."),
   );
 }
 
@@ -200,13 +193,9 @@ function manualBlock(render) {
     el(
       "p",
       { className: "quiet" },
-      "Choose the folder that contains ",
+      "The folder holding ",
       el("span", { className: "data" }, "main"),
-      " and ",
-      el("span", { className: "data" }, "MOHAA.exe"),
-      " or ",
-      el("span", { className: "data" }, "openmohaa.exe"),
-      ".",
+      " and the game client.",
     ),
   );
 }
@@ -228,15 +217,15 @@ async function browse(render) {
 async function check(path, render) {
   view.busy = true;
   view.error = null;
-  view.message = "Reading the folder.";
+  view.message = "Reading.";
   render();
   try {
     const install = await detectInstall(path);
     if (install) {
       view.candidate = install;
-      view.message = "Reveille read the game files and knows where maps belong.";
+      view.message = "Read from the game files on disk.";
     } else {
-      view.message = "That folder does not hold a Medal of Honor installation.";
+      view.message = "No Medal of Honor installation there.";
     }
   } catch (error) {
     view.error = errorText(error);
@@ -272,16 +261,16 @@ export async function autoDetect(render, onReady, { skipConfirmation = true } = 
         return;
       }
       view.candidate = install;
-      view.message = "Reveille read the game files and knows where maps belong.";
-      view.manualPath = install.root;
+      view.message = "Read from the game files on disk.";
+      view.manualPath = displayPath(install.root);
     } else {
       view.message = skipConfirmation
-        ? "Windows did not list an Allied Assault installation. Point Reveille at it once and it will remember."
-        : "Point Reveille at the folder that holds main and the game client.";
+        ? "Nothing was found automatically. Pick the folder once and Reveille remembers it."
+        : "Pick your game folder.";
     }
   } catch (error) {
     view.error = errorText(error);
-    view.message = "Detection could not finish. You can still point Reveille at the folder.";
+    view.message = "Detection failed. Pick the folder instead.";
   } finally {
     view.busy = false;
     render();

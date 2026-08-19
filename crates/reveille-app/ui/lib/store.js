@@ -21,6 +21,8 @@ export const state = {
   /** Sweep progress. `running` drives the toolbar; `probed`/`inspected` the meter. */
   browse: {
     running: false,
+    /** Stop was pressed; probes already in flight are still draining. */
+    stopping: false,
     registered: 0,
     inspected: 0,
     probed: 0,
@@ -39,9 +41,6 @@ export const state = {
 
   /** Candidate ids the player picked for ambiguous maps, keyed by map name. */
   choices: new Map(),
-
-  /** Explicit consent to join without a complete rotation check. */
-  acceptIncomplete: false,
 
   /** Install run in progress, or null. */
   installRun: null,

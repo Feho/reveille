@@ -662,6 +662,47 @@ a choice, 1 with no source; selecting a candidate moved the total to 13.9 MB and
 still needs a choice". The install-and-launch step was left to the owner rather than writing into a
 live game folder unasked.
 
+**Second review by the owner, five issues, all fixed.**
+
+*The Stop button did nothing.* It was rebuilt on every render, and a sweep notifies several times a
+second — so the element was replaced between the player's mousedown and mouseup and no `click` event
+was ever dispatched. This is the same defect class as the one-character search field and was missed
+because the fix at the time was applied to the toolbar's inputs, not to its buttons. Both browse
+controls are now built once and shown or hidden; the toolbar creates no element after boot. The
+cancellation path itself was correct, but two gaps were closed while there: a stop pressed just as a
+sweep ended left a `Notify` permit behind that would cancel the *next* sweep before it probed
+anything, so the permit is drained at the start of each browse; and the ~2.5 s during which probes
+already in flight drain now reads "Stopping…" rather than leaving Stop looking inert.
+
+*Selecting a server while the list was still loading answered "This server is no longer in the
+current list."* Streamed rows were offered to the player immediately but `AppState.servers` — what
+`preview_join` and `install_and_launch` look up — was only populated when the sweep finished. Every
+answered server is now pushed into the shared list as it arrives, and the authoritative
+post-deduplication list still replaces it at the end.
+
+*The folder shown in the setup field was `\\?\D:\Jeux\EA GAMES\MOHDA`.* `displayPath` strips the
+Windows extended-length prefix and was applied everywhere the path is *displayed*, but the editable
+input was seeded from the raw canonicalised `install.root`.
+
+*Too much explanatory text.* The interface argued its reasoning at the player: a paragraph justifying
+each rotation group, a standing note about bans and capacity on every server, the no-auto-apply
+policy restated at every ambiguous match. Every one of those sentences was true and none of them
+changed what the player does next. The explanations that survive are the ones that do; the rest
+moved to `title` attributes on the thing they explain, or out of the interface entirely. The rule is
+now written down in `docs/ui.md` §9, because "be honest" had been read as "explain everything" and
+the two are not the same.
+
+*The consent checkbox was one click too many.* Requiring "Join after fetching what is missing" to be
+ticked before the join button enabled asked the player to agree to something stated directly above
+it and then act on it. Consent is now the click itself, and the button's label is what makes it
+informed: `Join`, `Get 9.1 MB & join`, `Join without a rotation check`, `Join anyway`. The thing
+that must not return is the *silent* inference the first shell did — deriving `accept_incomplete`
+from the state without changing anything the player could see.
+
+Re-verified live against the same install: the sweep answered 106 of 195, Stop reported "stopped
+early", a needs-maps server previewed mid-sweep without error, and `<[TFC]> Sniper Only OBJ` again
+reproduced 7 of 14 present with 9.1 MB across 4 files and 2 awaiting a choice.
+
 ---
 
 ## Verification overall

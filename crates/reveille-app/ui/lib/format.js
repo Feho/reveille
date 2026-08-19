@@ -145,13 +145,13 @@ export function stateName(state) {
 export function stateExplanation(state) {
   switch (state?.state) {
     case "compatible":
-      return "Every map this server published is on disk. That is all Reveille can check — the server still decides whether you get in.";
+      return "Every map this server published is on disk. The server still decides whether you get in.";
     case "needs_maps":
       return "This server's rotation uses maps you do not have. Reveille can fetch them before you join.";
     case "no_source":
       return "At least one map in the rotation is not in any catalogue Reveille can reach.";
     default:
-      return "This server did not publish its map list, so there is nothing to check in advance.";
+      return "This server published no map list, so there is nothing to check in advance.";
   }
 }
 

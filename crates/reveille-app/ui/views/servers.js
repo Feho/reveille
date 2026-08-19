@@ -11,7 +11,7 @@
 // quarter of the live population behind a colour that reads as a warning when it
 // actually means "one click of downloads".
 
-import { el, fill, preserveFocus } from "../lib/dom.js";
+import { el, fill } from "../lib/dom.js";
 import { mapName, needsCell, nonResultReason, occupancy, shortVersion } from "../lib/format.js";
 import { saveFilters, state, update, visibleServers } from "../lib/store.js";
 
@@ -49,7 +49,33 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults })
       saveFilters();
     }),
   );
-  const actionSlot = el("div", { className: "toolbar__action" });
+  // Both browse controls are built once and shown or hidden, never rebuilt. A
+  // sweep notifies several times a second, and replacing a button between its
+  // mousedown and mouseup swallows the click — which is why Stop appeared dead.
+  const meterFill = el("span", { className: "meter__fill" });
+  const meter = el(
+    "div",
+    { className: "meter", role: "progressbar", "aria-label": "Checking servers" },
+    meterFill,
+  );
+  const meterCount = el("span", { className: "quiet data" });
+  const stopButton = el(
+    "button",
+    { type: "button", className: "btn btn--sm", dataset: { focusKey: "browse-stop" }, onclick: onCancel },
+    "Stop",
+  );
+  const progress = el("div", { className: "toolbar__progress" }, meter, meterCount, stopButton);
+  const refresh = el(
+    "button",
+    {
+      type: "button",
+      className: "btn btn--primary",
+      dataset: { focusKey: "browse-refresh" },
+      onclick: onRefresh,
+    },
+    "Find servers",
+  );
+  const actionSlot = el("div", { className: "toolbar__action" }, progress, refresh);
   const toolbar = el(
     "div",
     { className: "toolbar" },
@@ -80,6 +106,30 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults })
   let lastPainted = 0;
   let pending = null;
 
+  const paintAction = () => {
+    const running = state.browse.running;
+    progress.classList.toggle("hidden", !running);
+    refresh.classList.toggle("hidden", running);
+    refresh.textContent = state.servers.length ? "Refresh" : "Find servers";
+    if (!running) return;
+    // The sweep spawns no further probes once stopped, but the ones already in
+    // flight still have to time out. Say so rather than leaving Stop looking inert.
+    stopButton.disabled = state.browse.stopping;
+    stopButton.textContent = state.browse.stopping ? "Stopping…" : "Stop";
+    const { probed, inspected } = state.browse;
+    const known = inspected > 0;
+    meter.classList.toggle("meter--indeterminate", !known);
+    meterFill.style.width = known
+      ? `${Math.min(100, Math.round((probed / inspected) * 100))}%`
+      : "";
+    meterCount.textContent = known ? `${probed}/${inspected}` : "contacting master";
+    if (known) {
+      meter.setAttribute("aria-valuenow", String(probed));
+      meter.setAttribute("aria-valuemin", "0");
+      meter.setAttribute("aria-valuemax", String(inspected));
+    }
+  };
+
   const syncSelection = () => {
     for (const tr of tbody.children) {
       if (!tr.dataset.address) continue;
@@ -99,9 +149,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults })
     hasPeople.setAttribute("aria-pressed", state.filters.hasPeople ? "true" : "false");
     hideBlocked.setAttribute("aria-pressed", state.filters.hideBlocked ? "true" : "false");
     if (search.value !== state.filters.query) search.value = state.filters.query;
-    preserveFocus(toolbar, () =>
-      fill(actionSlot, state.browse.running ? progressGroup(onCancel) : refreshButton(onRefresh)),
-    );
+    paintAction();
     fill(statusbar, ...statusbarContents(onShowNonResults));
     live.textContent = liveText();
 
@@ -169,50 +217,6 @@ function headerCell(column) {
       column.label,
       active && el("span", { className: "sort-arrow" }, state.sort.direction === "asc" ? "▲" : "▼"),
     ),
-  );
-}
-
-function progressGroup(onCancel) {
-  const { probed, inspected } = state.browse;
-  const known = inspected > 0;
-  const percent = known ? Math.min(100, Math.round((probed / inspected) * 100)) : 0;
-  const meterAttrs = {
-    className: `meter${known ? "" : " meter--indeterminate"}`,
-    role: "progressbar",
-    "aria-label": "Checking servers",
-  };
-  if (known) {
-    meterAttrs["aria-valuenow"] = probed;
-    meterAttrs["aria-valuemin"] = 0;
-    meterAttrs["aria-valuemax"] = inspected;
-  }
-  return el(
-    "div",
-    { className: "toolbar__progress" },
-    el(
-      "div",
-      meterAttrs,
-      el("span", { className: "meter__fill", style: known ? `width:${percent}%` : "" }),
-    ),
-    el("span", { className: "quiet data" }, known ? `${probed}/${inspected}` : "contacting master"),
-    el(
-      "button",
-      { type: "button", className: "btn btn--sm", dataset: { focusKey: "browse-action" }, onclick: onCancel },
-      "Stop",
-    ),
-  );
-}
-
-function refreshButton(onRefresh) {
-  return el(
-    "button",
-    {
-      type: "button",
-      className: "btn btn--primary",
-      dataset: { focusKey: "browse-action" },
-      onclick: onRefresh,
-    },
-    state.servers.length ? "Refresh" : "Find servers",
   );
 }
 
@@ -315,7 +319,7 @@ function emptyRow() {
       el(
         "p",
         null,
-        "Reveille asks the master list who is registered, then asks each one directly. Only servers that answer appear here.",
+        "Nothing has been checked yet.",
       ),
     ];
   }
@@ -372,7 +376,7 @@ export function nonResultsBreakdown() {
     el(
       "p",
       { className: "quiet" },
-      "These endpoints are registered with the master list but produced no usable reply. They are recorded, not hidden — the in-game browser lists them anyway, which is most of why the game looks abandoned.",
+      "Registered with the master list, but no usable reply. The in-game browser lists these anyway.",
     ),
     el(
       "dl",

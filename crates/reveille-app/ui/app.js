@@ -91,6 +91,7 @@ async function refresh() {
   update((next) => {
     next.browse = {
       running: true,
+      stopping: false,
       registered: 0,
       inspected: 0,
       probed: 0,
@@ -130,6 +131,7 @@ async function refresh() {
 }
 
 function stopBrowse() {
+  update((next) => (next.browse.stopping = true));
   cancelBrowse().catch(() => {
     // The sweep ends on its own if the message does not land.
   });
@@ -161,7 +163,6 @@ async function select(address) {
     next.previewProgress = null;
     next.previewError = null;
     next.choices = new Map();
-    next.acceptIncomplete = false;
     next.installRun = null;
     next.joinResult = null;
     next.joinError = null;
@@ -195,7 +196,7 @@ onPreviewProgress((progress) => {
 
 /* Getting files and joining -------------------------------------------------- */
 
-async function getAndJoin(row) {
+async function getAndJoin(row, acceptIncomplete) {
   const preview = state.preview?.address === row.address ? state.preview : null;
   const totals = preview ? shoppingTotals(preview) : { count: 0 };
   const selectedCandidateIds = [...state.choices.values()];
@@ -211,7 +212,7 @@ async function getAndJoin(row) {
       state.install.root,
       row.address,
       selectedCandidateIds,
-      state.acceptIncomplete,
+      acceptIncomplete,
     );
     update((next) => {
       next.installRun = null;
