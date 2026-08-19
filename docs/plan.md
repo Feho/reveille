@@ -359,10 +359,27 @@ clippy and fmt clean.
   homeconfig, homedata, homestate, then basepath, apppath, steampath, gogpath,
   microsoftstorepath; `FS_AddGameDirectories` walks that array **in reverse** and
   `FS_AddGameDirectory` prepends, so the first registered wins (`files.cpp:3245-3257`,
-  `3534-3572`). **Consequence: install downloaded maps into `%APPDATA%\moh\main`, not the game
-  directory.** No UAC prompt on a `C:\Program Files (x86)` install, the user's purchased assets
-  are never written to, and the engine still loads them ahead of everything else. An elevation
-  prompt mid-journey is exactly the kind of stall the ten-minute criterion cannot absorb.
+  `3534-3572`).
+
+  **Install target: the game directory first, the home path only as a fallback.** An earlier
+  draft of this plan said always write to `%APPDATA%\moh\main`. That was over-corrected. Dropping
+  pk3s into `<install>\main\` is what the community does, what every guide says, and where a
+  user expects to find and delete them later — confirmed by the project owner from their own
+  Windows machine. It also works on retail 1.11/1.12, which predates the home-path split and has
+  no home path at all. So:
+
+  1. Probe whether `<install>\main` is writable — do not infer it from the path string.
+  2. If it is, install there. This is the normal case; standalone GOG defaults to
+     `C:\GOG Games\...`, which needs no elevation.
+  3. If it is not — the `C:\Program Files (x86)` case — fall back to `%APPDATA%\moh\main` on
+     OpenMoHAA, and say plainly in the UI where the files went. Never raise a UAC prompt
+     mid-journey; the ten-minute criterion cannot absorb one.
+  4. On retail there is no fallback. If the directory is unwritable, that is a real blocker and
+     must be reported as one, not worked around silently.
+
+  This keeps `install_archive`'s existing `game_directory` parameter meaningful — Part B supplies
+  the resolved target, and the choice of target is the caller's.
+
 - **Caveat, and it is the untested one:** all of the above is OpenMoHAA. Retail 1.11/1.12 predates
   the home-path split and most likely writes to the install directory, which is where the UAC risk
   actually lives. Test this first on the Windows machine.
