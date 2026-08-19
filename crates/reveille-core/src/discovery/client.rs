@@ -13,9 +13,9 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use super::model::{
-    BrowseReport, ClientCapacity, ClientsReported, DownloadFlags, GamePort, JoinWindowSeconds,
-    MasterEndpoint, NonResult, NonResultReason, PingMillis, ProbeOutcome, ProbeStage,
-    ReservedSlots, Server, SimulatedClientsReported, TargetGame,
+    BotsReported, BrowseReport, ClientCapacity, ClientsReported, DownloadFlags, GamePort,
+    JoinWindowSeconds, MasterEndpoint, NonResult, NonResultReason, PingMillis, ProbeOutcome,
+    ProbeStage, ReportedOccupancy, ReservedSlots, Server, TargetGame,
 };
 use super::protocol::{
     CryptoError, FieldMap, OOB_SEND_HEADER, ParseError, build_master_query, parse_gamespy_status,
@@ -289,11 +289,18 @@ fn build_server(
     gamespy: &FieldMap,
     status: &FieldMap,
 ) -> Server {
+    let version = nonempty(status, "version");
+    // sv_gamespy.c:164 publishes SV_NumClients() as numplayers.
     let clients_reported = parse_u32(gamespy, "numplayers").map(ClientsReported::new);
-    let simulated_clients_reported = parse_u32(gamespy, "minplayers").and_then(|minimum| {
-        clients_reported
-            .map(|clients| SimulatedClientsReported::new(minimum.saturating_sub(clients.get())))
-    });
+    // sv_gamespy.c:189 publishes numBots + SV_NumClients() as minplayers. This meaning is
+    // OpenMoHAA-specific; retail GameSpy's minplayers field must not be interpreted as bots.
+    let bots_reported = version
+        .as_deref()
+        .filter(|version| is_openmohaa_version(version))
+        .and_then(|_| parse_u32(gamespy, "minplayers"))
+        .and_then(|minimum| {
+            clients_reported.map(|clients| BotsReported::new(minimum.saturating_sub(clients.get())))
+        });
     Server {
         endpoint,
         game_port,
@@ -302,7 +309,7 @@ fn build_server(
             .unwrap_or_default(),
         game_name: nonempty(gamespy, "gamename"),
         game_version: nonempty(gamespy, "gamever"),
-        version: nonempty(status, "version"),
+        version,
         protocol: nonempty(status, "protocol"),
         current_map: nonempty(status, "mapname").or_else(|| nonempty(gamespy, "mapname")),
         rotation: status
@@ -319,13 +326,18 @@ fn build_server(
         maximum_ping: parse_u32(status, "sv_maxPing").map(PingMillis::new),
         join_window: parse_u32(status, "g_allowjointime").map(JoinWindowSeconds::new),
         reserved_slots: parse_u32(status, "sv_privateClients").map(ReservedSlots::new),
-        clients_reported,
-        simulated_clients_reported,
+        occupancy: ReportedOccupancy::new(clients_reported, bots_reported),
         client_capacity: parse_u32(gamespy, "maxplayers")
             .or_else(|| parse_u32(status, "sv_maxclients"))
             .map(ClientCapacity::new),
         pure: nonempty(status, "pure"),
     }
+}
+
+fn is_openmohaa_version(version: &str) -> bool {
+    let version = version.to_ascii_lowercase();
+    // OpenMoHAA builds use either the project name or the OPM marker in serverinfo.
+    version.contains("openmohaa") || version.contains("(opm)")
 }
 
 fn game_port_from_gamespy(fields: &FieldMap) -> Result<GamePort, NonResultReason> {
@@ -443,7 +455,10 @@ mod tests {
             ("maxplayers".to_owned(), "16".to_owned()),
         ]);
         let status = FieldMap::from([
-            ("version".to_owned(), "engine build".to_owned()),
+            (
+                "version".to_owned(),
+                "Medal of Honor Allied Assault 1.12+0.83.0 (OPM)".to_owned(),
+            ),
             ("protocol".to_owned(), "8".to_owned()),
             ("mapname".to_owned(), "dm/current".to_owned()),
             ("sv_maplist".to_owned(), "dm/current obj/next".to_owned()),
@@ -467,16 +482,19 @@ mod tests {
         );
         assert_eq!(
             server
+                .occupancy
                 .clients_reported
                 .map(crate::discovery::ClientsReported::get),
             Some(3)
         );
         assert_eq!(
             server
-                .simulated_clients_reported
-                .map(crate::discovery::SimulatedClientsReported::get),
+                .occupancy
+                .bots_reported
+                .map(crate::discovery::BotsReported::get),
             Some(2)
         );
+        assert_eq!(server.occupancy.total_occupancy(), Some(5));
         assert_eq!(
             server
                 .client_capacity
@@ -514,5 +532,29 @@ mod tests {
                 .map(crate::discovery::ReservedSlots::get),
             Some(2)
         );
+    }
+
+    #[test]
+    fn does_not_infer_bots_from_retail_minplayers() {
+        let endpoint = MasterEndpoint {
+            address: Ipv4Addr::new(203, 0, 113, 9),
+            query_port: QueryPort::new(12_300),
+        };
+        let gamespy = FieldMap::from([
+            ("hostport".to_owned(), "12203".to_owned()),
+            ("numplayers".to_owned(), "3".to_owned()),
+            ("minplayers".to_owned(), "11".to_owned()),
+        ]);
+        let status = FieldMap::from([("version".to_owned(), "Medal of Honor 1.11".to_owned())]);
+
+        let server = build_server(
+            endpoint,
+            game_port_from_gamespy(&gamespy).expect("reply carries hostport"),
+            &gamespy,
+            &status,
+        );
+
+        assert_eq!(server.occupancy.bots_reported, None);
+        assert_eq!(server.occupancy.total_occupancy(), None);
     }
 }

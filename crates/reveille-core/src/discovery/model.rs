@@ -52,11 +52,15 @@ numeric_newtype!(
     ClientsReported(u32);
 );
 numeric_newtype!(
-    /// Simulated clients inferred from `OpenMoHAA`'s `GameSpy` `minplayers` field.
-    SimulatedClientsReported(u32);
+    /// Bot entities inferred from `OpenMoHAA`'s `GameSpy` `minplayers` field.
+    BotsReported(u32);
 );
 numeric_newtype!(
     /// Public client capacity reported by the server.
+    ///
+    /// This cannot be used to derive free slots when bots are present: the unreported
+    /// `sv_sharedbots` setting determines whether bots share this capacity or occupy entities
+    /// above it (`g_bot.cpp:215`).
     ClientCapacity(u32);
 );
 numeric_newtype!(
@@ -75,6 +79,37 @@ numeric_newtype!(
     /// Slots reserved behind the private password.
     ReservedSlots(u32);
 );
+
+/// Disjoint occupancy quantities reported or inferred for one server.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct ReportedOccupancy {
+    /// Every non-free client slot reported by `SV_NumClients()`.
+    pub clients_reported: Option<ClientsReported>,
+    /// Bot entities inferred only for an identified `OpenMoHAA` server.
+    pub bots_reported: Option<BotsReported>,
+}
+
+impl ReportedOccupancy {
+    /// Construct reported occupancy without implying that either quantity contains the other.
+    #[must_use]
+    pub const fn new(
+        clients_reported: Option<ClientsReported>,
+        bots_reported: Option<BotsReported>,
+    ) -> Self {
+        Self {
+            clients_reported,
+            bots_reported,
+        }
+    }
+
+    /// Return combined occupancy only when both disjoint quantities are known.
+    #[must_use]
+    pub fn total_occupancy(self) -> Option<u32> {
+        self.clients_reported?
+            .get()
+            .checked_add(self.bots_reported?.get())
+    }
+}
 
 /// A game family registered with the master server.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
@@ -176,11 +211,10 @@ pub struct Server {
     pub join_window: Option<JoinWindowSeconds>,
     /// Password-reserved slots.
     pub reserved_slots: Option<ReservedSlots>,
-    /// Every non-free client slot, never labelled players or humans.
-    pub clients_reported: Option<ClientsReported>,
-    /// Simulated clients inferred when `OpenMoHAA` publishes `minplayers`.
-    pub simulated_clients_reported: Option<SimulatedClientsReported>,
-    /// Public capacity reported by GameSpy/serverinfo.
+    /// Disjoint client-slot and bot-entity occupancy reports.
+    pub occupancy: ReportedOccupancy,
+    /// Public capacity reported by GameSpy/serverinfo. Do not derive free slots from this when
+    /// bots are present: the server's `sv_sharedbots` setting is not exposed by either reply.
     pub client_capacity: Option<ClientCapacity>,
     /// Raw `pure` value, when exposed.
     pub pure: Option<String>,
@@ -275,8 +309,13 @@ impl BrowseReport {
             getstatus_reachable: servers.len(),
             clients_reported: servers
                 .iter()
-                .filter_map(|server| server.clients_reported)
+                .filter_map(|server| server.occupancy.clients_reported)
                 .map(ClientsReported::get)
+                .sum(),
+            bots_reported: servers
+                .iter()
+                .filter_map(|server| server.occupancy.bots_reported)
+                .map(BotsReported::get)
                 .sum(),
             rotations_published: servers
                 .iter()
@@ -293,6 +332,11 @@ impl BrowseReport {
             pure_published: servers
                 .iter()
                 .filter(|server| server.pure.is_some())
+                .count(),
+            non_results: self
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.non_result.is_some())
                 .count(),
             protocols,
         }
@@ -312,6 +356,8 @@ pub struct BrowseSummary {
     pub getstatus_reachable: usize,
     /// Sum of non-free slots reported by complete servers.
     pub clients_reported: u32,
+    /// Sum of bot entities inferred for identified `OpenMoHAA` servers.
+    pub bots_reported: u32,
     /// Servers publishing a non-empty `sv_maplist`.
     pub rotations_published: usize,
     /// Servers publishing `sv_mapChecksum`.
@@ -320,6 +366,8 @@ pub struct BrowseSummary {
     pub pakradar_published: usize,
     /// Servers publishing `pure`.
     pub pure_published: usize,
+    /// Registered endpoints retained as non-results.
+    pub non_results: usize,
     /// Complete-server counts by protocol string.
     pub protocols: BTreeMap<String, usize>,
 }

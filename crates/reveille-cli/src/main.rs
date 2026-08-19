@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 use std::error::Error;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -82,6 +83,12 @@ struct ScanOutput<'a> {
     index: &'a MapIndex,
 }
 
+#[derive(Serialize)]
+struct BrowseOutput<'a> {
+    summary: discovery::BrowseSummary,
+    report: &'a discovery::BrowseReport,
+}
+
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
@@ -123,10 +130,16 @@ async fn run() -> Result<(), Box<dyn Error>> {
 
 async fn browse_servers(config: BrowseConfig, format: Format) -> Result<(), Box<dyn Error>> {
     let report = discovery::browse(config).await?;
+    let summary = report.summary();
     match format {
-        Format::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&BrowseOutput {
+                summary,
+                report: &report,
+            })?
+        ),
         Format::Text => {
-            let summary = report.summary();
             println!(
                 "Game: {} ({})",
                 report.target.label(),
@@ -137,6 +150,7 @@ async fn browse_servers(config: BrowseConfig, format: Format) -> Result<(), Box<
             println!("GameSpy reachable: {}", summary.gamespy_reachable);
             println!("getstatus reachable: {}", summary.getstatus_reachable);
             println!("Clients reported: {}", summary.clients_reported);
+            println!("Bots reported: {}", summary.bots_reported);
             println!("Rotations published: {}", summary.rotations_published);
             println!(
                 "Map checksums published: {}",
@@ -154,30 +168,17 @@ async fn browse_servers(config: BrowseConfig, format: Format) -> Result<(), Box<
             servers.sort_by_key(|server| {
                 std::cmp::Reverse(
                     server
+                        .occupancy
                         .clients_reported
                         .map_or(0, discovery::ClientsReported::get),
                 )
             });
             println!();
-            println!("Servers (counts are non-free client slots, not people):");
+            println!("Servers (client slots and bots are disjoint reported quantities):");
             for server in servers {
-                let clients = match (server.clients_reported, server.simulated_clients_reported) {
-                    (Some(total), Some(simulated))
-                        if total.get() > 0 && total.get() == simulated.get() =>
-                    {
-                        format!("{} (all simulated)", total.get())
-                    }
-                    (Some(total), Some(simulated)) if simulated.get() > 0 => {
-                        format!("{} ({} simulated)", total.get(), simulated.get())
-                    }
-                    (Some(total), _) => total.to_string(),
-                    (None, _) => "?".to_owned(),
-                };
-                let capacity = server
-                    .client_capacity
-                    .map_or_else(|| "?".to_owned(), |value| value.to_string());
+                let occupancy = render_occupancy(server.occupancy, server.client_capacity);
                 println!(
-                    "  {}:{}  {clients}/{capacity} clients  protocol={}  maps={}  {}",
+                    "  {}:{}  {occupancy}  protocol={}  maps={}  {}",
                     server.endpoint.address,
                     server.game_port,
                     server.protocol.as_deref().unwrap_or("?"),
@@ -186,16 +187,27 @@ async fn browse_servers(config: BrowseConfig, format: Format) -> Result<(), Box<
                 );
             }
 
-            let failures = report
-                .outcomes
-                .iter()
-                .filter(|outcome| outcome.non_result.is_some())
-                .count();
             println!();
-            println!("Recorded non-results: {failures}");
+            println!("Recorded non-results: {}", summary.non_results);
         }
     }
     Ok(())
+}
+
+fn render_occupancy(
+    occupancy: discovery::ReportedOccupancy,
+    capacity: Option<discovery::ClientCapacity>,
+) -> String {
+    let mut rendered = occupancy.clients_reported.map_or_else(
+        || "? clients".to_owned(),
+        |clients| format!("{clients} clients"),
+    );
+    if let Some(bots) = occupancy.bots_reported.filter(|bots| bots.get() > 0) {
+        let _ = write!(rendered, " (+{bots} bots)");
+    }
+    rendered.push_str(" · cap ");
+    rendered.push_str(&capacity.map_or_else(|| "?".to_owned(), |capacity| capacity.to_string()));
+    rendered
 }
 
 fn scan(path: &Path, format: Format) -> Result<(), Box<dyn Error>> {
@@ -243,4 +255,35 @@ fn scan(path: &Path, format: Format) -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use reveille_core::discovery::{
+        BotsReported, ClientCapacity, ClientsReported, ReportedOccupancy,
+    };
+
+    use super::render_occupancy;
+
+    #[test]
+    fn renders_equal_mixed_client_and_bot_counts_additively() {
+        let occupancy =
+            ReportedOccupancy::new(Some(ClientsReported::new(3)), Some(BotsReported::new(3)));
+
+        assert_eq!(
+            render_occupancy(occupancy, Some(ClientCapacity::new(32))),
+            "3 clients (+3 bots) · cap 32"
+        );
+    }
+
+    #[test]
+    fn renders_more_bots_than_clients_additively() {
+        let occupancy =
+            ReportedOccupancy::new(Some(ClientsReported::new(3)), Some(BotsReported::new(8)));
+
+        assert_eq!(
+            render_occupancy(occupancy, Some(ClientCapacity::new(32))),
+            "3 clients (+8 bots) · cap 32"
+        );
+    }
 }
