@@ -503,7 +503,7 @@ so the 84/15/15 and 83/16/15 index-comparison figures stand unchanged.
 `pkg-config --libs --cflags glib-2.0`. Run `32269538771`, the first failing run in the project's
 history. Reproduced locally: `cargo check -p reveille-app` on this aarch64 Linux machine fails
 the same way at `gdk-3.0`. The `windows-latest` leg of that run was **cancelled by the matrix's
-default `fail-fast`**, not failed — Windows is unproven for `d4812eb`, not broken.
+default `fail-fast`**, not failed, so it proved nothing either way about the shell.
 
 Fixed by splitting the matrix into two independent jobs: a `portable` job that tests, lints and
 format-checks `reveille-core` and `reveille-cli` on ubuntu — the invariant that actually matters,
@@ -511,6 +511,8 @@ since those two crates carry the deferred Linux and macOS builds — and a `wind
 the whole workspace including the shell. Separate jobs also mean neither leg can cancel the
 other. Installing GTK and WebKit on the ubuntu runner was considered and rejected: it buys a
 Linux build of a crate that is Windows-only for v1, at the cost of an apt step that will rot.
+Both jobs are green on `b99eac8`, so the Tauri shell is now built by CI on Windows and not only
+on the owner's machine.
 
 **Open — the same rule is hand-rolled in three places, and one copy is missing.** Endpoint dedup
 on `(address, game_port)` — the right key, since `hostport` is authoritative and multi-instance
