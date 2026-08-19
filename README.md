@@ -16,6 +16,16 @@ The scan reports the number of archives and maps, duplicate map providers, and t
 checksum for every map. Providers are ordered in engine lookup order; the first provider is the
 file the engine loads.
 
+## Browse public servers
+
+```console
+cargo run -p reveille-cli -- browse
+```
+
+Use `--limit N` for a smaller sample, `--game spearhead` or `--game breakthrough` for an
+expansion, and `--format json` for the complete structured report. Displayed client counts are
+the server's non-free slots; Reveille never labels them players or humans.
+
 ## Development
 
 ```console

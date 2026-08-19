@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bsp;
+pub mod discovery;
 pub mod install;
 pub mod mapindex;
 pub mod preflight;

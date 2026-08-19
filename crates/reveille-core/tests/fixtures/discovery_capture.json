@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-08-19",
+  "master": "master.333networks.com:28900",
+  "target_game": "mohaa",
+  "registered": 177,
+  "captured_server": {
+    "hostname": "<[TFC]> Sniper Only OBJ | www.tfc-clan.com",
+    "address": "173.249.214.104",
+    "query_port": 12300,
+    "game_port_from_hostport": 12203
+  }
+}

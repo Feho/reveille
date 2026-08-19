@@ -16,6 +16,7 @@ clap.workspace = true
 reveille-core = { path = "../reveille-core" }
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true
