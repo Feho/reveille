@@ -15,6 +15,7 @@ reveille-core = { path = "../reveille-core" }
 reveille-platform = { path = "../reveille-platform" }
 serde.workspace = true
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

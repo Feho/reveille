@@ -7,7 +7,8 @@ mod model;
 mod protocol;
 
 pub use client::{
-    BrowseConfig, DiscoveryError, RequestError, browse, query_getinfo, query_getstatus,
+    BrowseConfig, BrowseEvent, DiscoveryError, RequestError, browse, browse_streaming,
+    query_getinfo, query_getstatus,
 };
 pub use model::{
     BotsReported, BrowseReport, BrowseSummary, ClientCapacity, ClientsReported, DownloadFlags,

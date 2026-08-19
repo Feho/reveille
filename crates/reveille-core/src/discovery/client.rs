@@ -7,9 +7,11 @@ use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
+use serde::Serialize;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
@@ -99,6 +101,26 @@ pub enum DiscoveryError {
     Task(#[from] tokio::task::JoinError),
 }
 
+/// Incremental progress from one browse sweep.
+///
+/// Streamed outcomes are pre-deduplication: a registration reported here can still be demoted to
+/// a [`NonResultReason::DuplicateEndpoint`] once the sweep completes. The [`BrowseReport`] returned
+/// by [`browse_streaming`] is the authoritative result, and a consumer that displays streamed rows
+/// must reconcile against it. Keeping dedup at the end is what makes retention deterministic.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum BrowseEvent {
+    /// The master list was fetched. Emitted once, before any probe.
+    Registered {
+        /// Registrations returned by the master, before any limit is applied.
+        registered: usize,
+        /// Endpoints this sweep will actually inspect.
+        inspected: usize,
+    },
+    /// One endpoint finished probing.
+    Outcome(Box<ProbeOutcome>),
+}
+
 /// Fetch the master list and inspect registered servers with bounded concurrency.
 ///
 /// # Errors
@@ -106,6 +128,29 @@ pub enum DiscoveryError {
 /// Returns an error only when the master list cannot be obtained or an internal task panics.
 /// Unreachable, malformed, and duplicate individual registrations are retained in the report.
 pub async fn browse(config: BrowseConfig) -> Result<BrowseReport, DiscoveryError> {
+    sweep(config, None).await
+}
+
+/// Run a sweep, reporting progress on `sink` as it happens.
+///
+/// Closing the receiver cancels the sweep: no further endpoint is probed and the report describes
+/// only the endpoints already inspected. This is the whole cancellation mechanism — dropping the
+/// receiver is the signal, so no token type and no extra dependency is needed.
+///
+/// # Errors
+///
+/// Same as [`browse`].
+pub async fn browse_streaming(
+    config: BrowseConfig,
+    sink: mpsc::Sender<BrowseEvent>,
+) -> Result<BrowseReport, DiscoveryError> {
+    sweep(config, Some(&sink)).await
+}
+
+async fn sweep(
+    config: BrowseConfig,
+    sink: Option<&mpsc::Sender<BrowseEvent>>,
+) -> Result<BrowseReport, DiscoveryError> {
     let endpoints = fetch_master(config.target, config.master_timeout)
         .await
         .map_err(|source| DiscoveryError::Master {
@@ -118,9 +163,17 @@ pub async fn browse(config: BrowseConfig) -> Result<BrowseReport, DiscoveryError
     let concurrency = config.concurrency.max(1);
     let mut tasks = JoinSet::new();
     let mut outcomes = Vec::with_capacity(limit);
+    let mut cancelled = !emit(
+        sink,
+        BrowseEvent::Registered {
+            registered,
+            inspected: limit,
+        },
+    )
+    .await;
 
     loop {
-        while tasks.len() < concurrency {
+        while !cancelled && tasks.len() < concurrency {
             let Some(endpoint) = endpoints.next() else {
                 break;
             };
@@ -129,7 +182,11 @@ pub async fn browse(config: BrowseConfig) -> Result<BrowseReport, DiscoveryError
         let Some(result) = tasks.join_next().await else {
             break;
         };
-        outcomes.push(result?);
+        let outcome = result?;
+        if !emit(sink, BrowseEvent::Outcome(Box::new(outcome.clone()))).await {
+            cancelled = true;
+        }
+        outcomes.push(outcome);
     }
     record_duplicate_game_endpoints(&mut outcomes);
 
@@ -138,6 +195,14 @@ pub async fn browse(config: BrowseConfig) -> Result<BrowseReport, DiscoveryError
         registered,
         outcomes,
     })
+}
+
+/// Deliver one event. Returns `false` once the consumer has stopped listening.
+async fn emit(sink: Option<&mpsc::Sender<BrowseEvent>>, event: BrowseEvent) -> bool {
+    match sink {
+        None => true,
+        Some(sink) => sink.send(event).await.is_ok(),
+    }
 }
 
 fn record_duplicate_game_endpoints(outcomes: &mut [ProbeOutcome]) {

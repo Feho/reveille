@@ -26,9 +26,15 @@ required, and none survives a machine change.
 - [`docs/engine-facts.md`](docs/engine-facts.md) — protocol constants, the exact map-name
   normalisation, search-path precedence, frozen fixtures, and prohibitions. Every constant cites
   the openmohaa source line it came from.
+- [`docs/ui.md`](docs/ui.md) — the interface: the two decisions it rests on, the honesty rules
+  restated as UI rules, the colour tokens with their measured contrast, and the accessibility
+  requirements. **Authoritative.** The artifact links below are a convenience and one of them was
+  already unreachable to an agent that needed it; everything required to rebuild the interface is
+  in this file.
 - **PRD** — https://claude.ai/code/artifact/1ffdc89e-6861-4e6b-ab4f-2174d2db2e17
 - **Technical blueprint** — https://claude.ai/code/artifact/12731692-491d-4728-9c47-cc741234f839
-- **UI mockups** — https://claude.ai/code/artifact/d91bbdfc-9a13-4dea-98d5-39e244d28604
+- **UI mockups** — https://claude.ai/code/artifact/d91bbdfc-9a13-4dea-98d5-39e244d28604 (the
+  original study; `docs/ui.md` supersedes it where they differ)
 
 Engine ground truth is the openmohaa source at https://github.com/openmoh/openmohaa. Clone it
 when a protocol or filesystem question comes up; every citation in `docs/` points into it.

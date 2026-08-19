@@ -1,172 +1,274 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-const invoke = window.__TAURI__.core.invoke;
-const state = { install: null, servers: [], selected: null, preview: null };
-const $ = (selector) => document.querySelector(selector);
+// Boot, routing and the long-running operations. Views render from `state`;
+// this module is the only place that calls commands and mutates state in
+// response to them.
 
-function showScreen(name) {
-  document.querySelectorAll(".screen").forEach((screen) => screen.classList.remove("active"));
-  $(`#screen-${name}`).classList.add("active");
+import { $, fill } from "./lib/dom.js";
+import {
+  browseServers,
+  cancelBrowse,
+  errorText,
+  installAndLaunch,
+  onBrowseProgress,
+  onInstallProgress,
+  onPreviewProgress,
+  previewJoin,
+} from "./lib/api.js";
+import { displayPath } from "./lib/format.js";
+import {
+  loadFilters,
+  notify,
+  recallInstall,
+  selectedRow,
+  state,
+  subscribe,
+  update,
+} from "./lib/store.js";
+import { autoDetect, setupView } from "./views/setup.js";
+import { nonResultsBreakdown, serversView } from "./views/servers.js";
+import { joinView, shoppingTotals } from "./views/join.js";
+
+const shell = $("#shell");
+const setupRoot = $("#setup-root");
+const infoDialog = $("#info-dialog");
+
+loadFilters();
+state.rememberedInstall = recallInstall();
+
+const servers = serversView({
+  onRefresh: refresh,
+  onCancel: stopBrowse,
+  onSelect: select,
+  onShowNonResults: showNonResults,
+});
+const join = joinView($("#detail-slot"), { onJoin: getAndJoin });
+const setup = setupView(setupRoot, { onReady: enterServers });
+
+$("#toolbar-slot").replaceWith(servers.toolbar);
+$("#list-slot").replaceWith(servers.listPane);
+$("#status-slot").replaceWith(servers.statusbar);
+document.body.append(servers.live);
+
+$("#install-chip").addEventListener("click", leaveServers);
+$("#info-dialog-close").addEventListener("click", () => infoDialog.close());
+
+subscribe(render);
+
+function render() {
+  const ready = Boolean(state.install);
+  shell.classList.toggle("hidden", !ready);
+  setupRoot.classList.toggle("hidden", ready);
+  if (!ready) return;
+
+  $("#install-chip-path").textContent = displayPath(state.install.root);
+  servers.render();
+  join.render();
 }
 
-function setBusy(button, busy, label) {
-  button.disabled = busy;
-  if (label) button.textContent = busy ? label : button.dataset.label;
+/* First run ---------------------------------------------------------------- */
+
+function enterServers() {
+  render();
+  // Nothing is known about the population yet, so start looking immediately
+  // rather than making the first thing a newcomer sees an empty table.
+  if (!state.servers.length && !state.browse.running) refresh();
 }
 
-function rememberInstall(install) {
-  state.install = install;
-  localStorage.setItem("reveille-install", install.root);
-  $("#install-pill").textContent = `Game found · ${displayPath(install.root)}`;
-  $("#setup-title").textContent = "Allied Assault found";
-  $("#setup-message").textContent = "Reveille checked the game files and knows where to put maps.";
-  $("#found-path").textContent = displayPath(install.root);
-  $("#install-found").classList.remove("hidden");
-  $("#manual-path").classList.add("hidden");
-  $("#continue-button").classList.remove("hidden");
+function leaveServers() {
+  update((next) => {
+    next.install = null;
+    next.selected = null;
+    next.preview = null;
+  });
+  autoDetect(setup.render, enterServers, { skipConfirmation: false });
 }
 
-async function detectInstall(path = null) {
-  $("#setup-error").textContent = "";
+/* Browsing ----------------------------------------------------------------- */
+
+async function refresh() {
+  if (state.browse.running) return;
+  update((next) => {
+    next.browse = {
+      running: true,
+      registered: 0,
+      inspected: 0,
+      probed: 0,
+      answered: 0,
+      nonResults: 0,
+      cancelled: false,
+      error: null,
+      completedAt: null,
+    };
+    next.servers = [];
+    next.summary = null;
+    next.nonResults = [];
+    next.selected = null;
+    next.preview = null;
+    next.joinResult = null;
+  });
+
   try {
-    const install = await invoke("detect_install", { selectedPath: path });
-    if (install) return rememberInstall(install);
-    $("#setup-title").textContent = "Show Reveille your game";
-    $("#setup-message").textContent = "Windows did not list an Allied Assault installation. You can point to it once.";
-    $("#manual-path").classList.remove("hidden");
-    $("#install-pill").textContent = "Game folder needed";
-  } catch (error) {
-    $("#setup-error").textContent = String(error);
-    $("#manual-path").classList.remove("hidden");
-  }
-}
-
-function stateInfo(value) {
-  const kind = value?.state || "cant_tell";
-  if (kind === "compatible") return { kind, label: "Compatible", icon: "✓", copy: "Nothing Reveille can check is wrong. The server still makes the final decision." };
-  if (kind === "needs_maps") return { kind: "needs", label: `Needs ${value.count} maps`, icon: "↓", copy: "Reveille found the missing maps and can put them in the right place." };
-  if (kind === "no_source") return { kind: "no-source", label: "No source", icon: "!", copy: "At least one required map could not be found. Reveille will not pretend this join is ready." };
-  return { kind: "cant-tell", label: "Can't tell", icon: "?", copy: "This server does not publish its map list, so Reveille cannot check it in advance." };
-}
-
-function occupancy(server) {
-  const clients = server.occupancy.clients_reported;
-  const bots = server.occupancy.bots_reported;
-  const capacity = server.client_capacity ?? "?";
-  return `${clients ?? "?"} clients${bots > 0 ? ` (+${bots} bots)` : ""} · cap ${capacity}`;
-}
-
-function renderServers() {
-  const query = $("#server-filter").value.trim().toLowerCase();
-  const list = state.servers.filter((item) => item.server.hostname.toLowerCase().includes(query));
-  $("#server-list").innerHTML = list.length ? list.map((item) => {
-    const info = stateInfo(item.compatibility.state);
-    const map = item.server.current_map || "Not published";
-    return `<button class="server-row" data-address="${item.address}">
-      <span class="server-name">${escapeHtml(item.server.hostname)}<small class="server-address">${item.address}</small></span>
-      <span class="cell-muted">${occupancy(item.server)}</span>
-      <span class="cell-muted">${escapeHtml(map)}</span>
-      <span class="status ${info.kind}">${info.label}</span><span>›</span>
-    </button>`;
-  }).join("") : `<div class="empty">No server names match that search.</div>`;
-  document.querySelectorAll(".server-row").forEach((row) => row.addEventListener("click", () => openJoin(row.dataset.address)));
-}
-
-async function refreshServers() {
-  const button = $("#refresh-servers");
-  button.dataset.label ||= button.textContent;
-  setBusy(button, true, "Checking servers…");
-  $("#browser-error").textContent = "";
-  $("#server-list").innerHTML = `<div class="empty">Contacting the master list and checking each server…</div>`;
-  try {
-    const payload = await invoke("browse_servers", { path: state.install.root });
-    state.servers = payload.servers;
-    $("#browser-summary").textContent = `${payload.servers.length} servers answered · ${payload.recorded_non_results} did not answer and were skipped`;
-    renderServers();
-  } catch (error) {
-    $("#browser-error").textContent = String(error);
-    $("#server-list").innerHTML = `<div class="empty">Servers could not be refreshed. Your game files were not changed.</div>`;
-  } finally { setBusy(button, false, "Checking servers…"); }
-}
-
-async function openJoin(address) {
-  state.selected = state.servers.find((server) => server.address === address);
-  showScreen("join");
-  $("#join-server-name").textContent = state.selected.server.hostname;
-  $("#join-server-meta").textContent = `${address} · ${occupancy(state.selected.server)}`;
-  $("#state-card").className = "state-card loading";
-  $("#state-title").textContent = "Checking your maps";
-  $("#state-copy").textContent = "This usually takes a moment.";
-  $("#map-actions").innerHTML = "";
-  $("#play-button").classList.add("hidden");
-  $("#join-error").textContent = "";
-  try {
-    state.preview = await invoke("preview_join", { path: state.install.root, address });
-    renderPreview();
-  } catch (error) { $("#join-error").textContent = String(error); }
-}
-
-function renderPreview() {
-  const preview = state.preview;
-  const info = stateInfo(preview.assessment.state);
-  $("#state-card").className = `state-card ${info.kind}`;
-  $("#state-icon").textContent = info.icon;
-  $("#state-title").textContent = info.label;
-  $("#state-copy").textContent = info.copy;
-  $("#maps-check").innerHTML = `<span>${info.kind === "compatible" ? "✓" : "·"}</span> Maps used by this server`;
-  const choices = [];
-  for (const resolution of preview.catalogue?.resolutions || []) {
-    if (resolution.outcome === "choice_required") {
-      choices.push(`<div class="map-choice"><strong>${escapeHtml(resolution.wanted.name)} needs your choice</strong>${resolution.choices.map((choice) => `<label><input type="radio" name="choice-${escapeHtml(resolution.wanted.name)}" value="${choice.id}"> ${escapeHtml(choice.filename)}</label>`).join("")}</div>`);
-    }
-  }
-  $("#map-actions").innerHTML = choices.join("");
-  if (preview.used_home_fallback) {
-    $("#fallback-note").textContent = `This install is protected. Maps will be kept in ${displayPath(preview.game_directory)}`;
-    $("#fallback-note").classList.remove("hidden");
-  } else { $("#fallback-note").classList.add("hidden"); }
-  if (["compatible", "needs_maps", "cant_tell"].includes(preview.assessment.state.state)) {
-    $("#play-button").textContent = preview.assessment.state.state === "needs_maps" ? "Get maps and play →" : "Play now →";
-    $("#play-button").classList.remove("hidden");
-  }
-}
-
-async function installAndLaunch() {
-  const button = $("#play-button");
-  button.dataset.label ||= button.textContent;
-  setBusy(button, true, "Getting ready…");
-  $("#join-error").textContent = "";
-  const selectedCandidateIds = [...document.querySelectorAll("#map-actions input:checked")].map((input) => Number(input.value));
-  try {
-    const result = await invoke("install_and_launch", {
-      path: state.install.root,
-      address: state.selected.address,
-      selectedCandidateIds,
-      allowUnchecked: state.preview.assessment.state.state === "cant_tell"
+    const payload = await browseServers(state.install.root);
+    update((next) => {
+      next.servers = payload.servers;
+      next.summary = payload.summary;
+      next.nonResults = payload.non_results;
+      next.browse.running = false;
+      next.browse.cancelled = payload.cancelled;
+      next.browse.completedAt = new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     });
-    if (result.process_id) {
-      $("#state-title").textContent = "Game launched";
-      $("#state-copy").textContent = "Allied Assault is connecting to the server now.";
-      button.classList.add("hidden");
-    } else {
-      state.preview.assessment = result.assessment;
-      renderPreview();
-      $("#join-error").textContent = result.non_results.join(" · ") || "Some maps still need a source or a choice.";
-    }
-  } catch (error) { $("#join-error").textContent = String(error); }
-  finally { setBusy(button, false, "Getting ready…"); }
+  } catch (error) {
+    update((next) => {
+      next.browse.running = false;
+      next.browse.error = errorText(error);
+    });
+  }
 }
 
-function escapeHtml(value) { const element = document.createElement("span"); element.textContent = String(value); return element.innerHTML; }
-function displayPath(value) { return String(value).replace(/^\\\\\?\\/, ""); }
+function stopBrowse() {
+  cancelBrowse().catch(() => {
+    // The sweep ends on its own if the message does not land.
+  });
+}
 
-$("#check-path").addEventListener("click", () => detectInstall($("#install-path").value));
-$("#continue-button").addEventListener("click", () => { showScreen("browser"); refreshServers(); });
-$("#refresh-servers").addEventListener("click", refreshServers);
-$("#server-filter").addEventListener("input", renderServers);
-$("#back-to-browser").addEventListener("click", () => showScreen("browser"));
-$("#play-button").addEventListener("click", installAndLaunch);
-document.querySelectorAll("[data-go='browser']").forEach((button) => button.addEventListener("click", () => state.install && showScreen("browser")));
+onBrowseProgress((progress) => {
+  if (!state.browse.running) return;
+  update((next) => {
+    next.browse.registered = progress.registered;
+    next.browse.inspected = progress.inspected;
+    next.browse.probed = progress.probed;
+    next.browse.answered = progress.answered;
+    next.browse.nonResults = progress.non_results;
+    // Streamed rows are pre-deduplication; the payload that arrives when the
+    // sweep ends replaces this list with the authoritative one.
+    if (progress.row) next.servers = [...next.servers, progress.row];
+  });
+});
 
-const remembered = localStorage.getItem("reveille-install");
-detectInstall(remembered);
+/* Selecting and previewing -------------------------------------------------- */
+
+let previewToken = 0;
+
+async function select(address) {
+  const token = ++previewToken;
+  update((next) => {
+    next.selected = address;
+    next.preview = null;
+    next.previewProgress = null;
+    next.previewError = null;
+    next.choices = new Map();
+    next.acceptIncomplete = false;
+    next.installRun = null;
+    next.joinResult = null;
+    next.joinError = null;
+  });
+
+  const row = selectedRow();
+  // Nothing to resolve: the rotation is already satisfied, or there is none.
+  if (!row || row.compatibility.state.state === "compatible") return;
+
+  update((next) => (next.previewProgress = { index: -1, of: 0, map: "" }));
+  try {
+    const preview = await previewJoin(state.install.root, address);
+    if (token !== previewToken) return;
+    update((next) => {
+      next.preview = preview;
+      next.previewProgress = null;
+    });
+  } catch (error) {
+    if (token !== previewToken) return;
+    update((next) => {
+      next.previewProgress = null;
+      next.previewError = errorText(error);
+    });
+  }
+}
+
+onPreviewProgress((progress) => {
+  if (progress.address !== state.selected) return;
+  update((next) => (next.previewProgress = progress));
+});
+
+/* Getting files and joining -------------------------------------------------- */
+
+async function getAndJoin(row) {
+  const preview = state.preview?.address === row.address ? state.preview : null;
+  const totals = preview ? shoppingTotals(preview) : { count: 0 };
+  const selectedCandidateIds = [...state.choices.values()];
+
+  update((next) => {
+    next.joinError = null;
+    next.joinResult = null;
+    next.installRun = totals.count > 0 ? { items: new Map(), done: false } : null;
+  });
+
+  try {
+    const result = await installAndLaunch(
+      state.install.root,
+      row.address,
+      selectedCandidateIds,
+      state.acceptIncomplete,
+    );
+    update((next) => {
+      next.installRun = null;
+      next.joinResult = { ...result, address: row.address };
+    });
+  } catch (error) {
+    update((next) => {
+      next.installRun = null;
+      next.joinError = errorText(error);
+    });
+  }
+}
+
+onInstallProgress((progress) => {
+  if (!state.installRun) return;
+  update((next) => {
+    const items = next.installRun.items;
+    const existing = items.get(progress.map) ?? {
+      map: progress.map,
+      filename: progress.filename,
+      received: 0,
+      total: null,
+    };
+    items.set(progress.map, {
+      ...existing,
+      filename: progress.filename,
+      phase: progress.phase,
+      received: progress.received ?? existing.received,
+      total: progress.total ?? existing.total,
+      reason: progress.reason ?? existing.reason,
+    });
+  });
+});
+
+/* Dialogs and global keys ---------------------------------------------------- */
+
+function showNonResults() {
+  fill($("#info-dialog-body"), ...nonResultsBreakdown());
+  infoDialog.showModal();
+}
+
+document.addEventListener("keydown", (event) => {
+  if (!state.install) return;
+  const typing = event.target instanceof HTMLInputElement;
+  if (event.key === "/" && !typing) {
+    event.preventDefault();
+    servers.focusSearch();
+  } else if (event.key === "Escape" && typing) {
+    update((next) => (next.filters.query = ""));
+    servers.focusFirstRow();
+  } else if (event.key === "F5" || (event.ctrlKey && event.key === "r")) {
+    event.preventDefault();
+    if (!state.browse.running) refresh();
+  }
+});
+
+/* Boot ---------------------------------------------------------------------- */
+
+notify();
+autoDetect(setup.render, enterServers);

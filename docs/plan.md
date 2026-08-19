@@ -592,6 +592,76 @@ requiring a choice, 1 with no source.
 > server's game directory and the frozen fixture behind `real_corpus.rs`. Installing into it makes
 > the 88-map and 7-of-14 assertions fail. Point `--path` at a copy.
 
+### Interface redesign (19 Aug 2026)
+
+**The shell's interface was rebuilt from scratch, and the design now lives in the repository.**
+The previous interface was written by an agent that could not fetch the UI mockups linked from
+`AGENTS.md`, and without them it produced a marketing page in a launcher's clothes: a welcome hero,
+a three-step promise grid, 75px serif headlines, a film-grain overlay, and a four-column table that
+discarded almost everything the pipeline knows. The root cause was the design living only at a URL,
+so the first fix is [`docs/ui.md`](ui.md) — authoritative, offline, and sufficient to rebuild the
+interface with no network access.
+
+**Decision — the server list shows cost, not a verdict.** The obvious design is a four-state status
+column: green Compatible, amber Needs N maps, red No source, grey Can't tell. It was rejected. A
+traffic light teaches one behaviour, click only green, and that is the wrong behaviour here: on the
+19 Aug corpus 15 of 113 classified servers need maps and 15 publish no rotation, so a green/amber
+column pushes a player away from about a quarter of the live population — and specifically away
+from the servers with the richest custom rotations. That reproduces, inside Reveille, the "the game
+is dead" impression Reveille exists to correct. The Needs column therefore prices the work
+(`+ 7 maps`) in default ink, leaves a ready server's cell **empty**, and colours only `No source`,
+the one state a download cannot fix. The four canonical state names are unchanged and moved to the
+detail pane, where the decision is actually made and there is room to explain them. Verified live:
+`<[TFC]> Sniper Only OBJ` reads `+ 7 maps` with no colour anywhere in the list.
+
+**Decision — the join gate is the map running now, not the whole rotation.** `No source` previously
+refused the launch outright. That is wrong: a server with one unobtainable map later in its rotation
+is playable until the rotation reaches it, and refusing invents a problem the engine does not have.
+`join::current_map_readiness` now classifies the server's `mapname` against local content as
+`Playable`/`Missing`/`Unknown`, independently of the rotation verdict, and `launch_refusal` refuses
+only when the map running *now* is absent — the one case consent cannot buy, because that connection
+is dropped on arrival. Everything else launches on explicit consent, with the consequence stated:
+*"you will be dropped when the rotation reaches this map."* Four unit tests pin the gate.
+
+**Consent is now explicit.** The old shell derived `allow_unchecked` silently from the state, so a
+player could launch an unchecked `Can't tell` join without ever being told. It is a visible toggle,
+and the command parameter was renamed `accept_incomplete` to match what it means.
+
+**Progress, cancellation and structure were added to the pipeline to support it.**
+`discovery::browse_streaming` reports each probe as it lands and stops when the receiver is dropped
+— cancellation with no token type and no new dependency. Duplicate-endpoint demotion still runs at
+the end, so streamed rows are explicitly pre-deduplication and the returned report stays
+authoritative. `MohDbClient::resolve_all_reporting` reports each catalogue lookup, and
+`download_mohdb_archive_reporting` streams the body to staging with byte progress instead of
+buffering whole archives in memory. The app emits `reveille://browse`, `reveille://preview` and
+`reveille://install`, caches the preview so a launch no longer repeats the moh-db pass it just ran,
+and returns `BrowseSummary` plus a per-reason non-result breakdown rather than a bare count.
+
+**Two defects were found by running it, not by reading it.** The Runs column rendered
+`server.version` — "Medal of Honor Allied Assault 1.11 win-x86 Mar 5 2002" — which truncates to
+"Medal of Honor Allied" in every row and distinguishes nothing; it now uses `game_version`
+(`1.11`, `1.12+0.83.0`). And rebuilding the toolbar on every state change detached the search
+input mid-keystroke, so the field accepted exactly one character; the toolbar is now built once and
+updated in place, with `preserveFocus` guarding the panes that do repaint.
+
+**Defect found by the owner after the redesign landed, and fixed.** The action bar hard-blocked the
+join whenever the map running now was absent, which meant a server running a map the player did not
+have offered no way to *get* that map — the one screen that could have solved it disabled its own
+button. The backend was never wrong: `install_and_launch` downloads, rescans and only then calls
+`launch_refusal`, so a fetchable current map is present by the time the gate runs. The interface was
+pre-empting it. `currentMapFetchable` now blocks only when the catalogue has no source for the
+running map, and otherwise says plainly that fetching the files is what makes the join work.
+Reproduced and fixed against `[FR]Les Vieux Raleurs` running `obj/obj_frag-n-rock`.
+
+**Verified live on the owner's Windows machine** against `D:\jeux\EA GAMES\MOHDA` (main, mainta,
+maintt; retail 1.11 and OpenMoHAA present). Detection reported the install as verified against a
+known binary hash with all three products listed. A full sweep answered 106 of 190 with 108 bots
+counted separately and 84 recorded non-results broken down by reason. `<[TFC]> Sniper Only OBJ`
+reproduced the frozen fixture exactly: 7 of 14 maps present, 4 exact matches at 9.1 MB, 2 requiring
+a choice, 1 with no source; selecting a candidate moved the total to 13.9 MB and the copy to "1 map
+still needs a choice". The install-and-launch step was left to the owner rather than writing into a
+live game folder unasked.
+
 ---
 
 ## Verification overall

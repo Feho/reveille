@@ -36,3 +36,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The shell's frontend has no build step, so nothing else would catch a
+      # syntax error in it before the window opens blank.
+      - name: Check the shell's JavaScript parses
+        shell: bash
+        run: find crates/reveille-app/ui -name '*.js' -print0 | xargs -0 -n1 node --check

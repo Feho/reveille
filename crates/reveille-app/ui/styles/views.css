@@ -1,0 +1,701 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
+/* The window shell, the server table, the detail pane and first run. */
+
+.shell {
+  display: grid;
+  grid-template-rows: var(--titlebar-height) auto 1fr auto;
+  height: 100vh;
+}
+
+/* Titlebar ----------------------------------------------------------------- */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  background: var(--void);
+  border-bottom: 1px solid var(--line);
+}
+
+.wordmark {
+  font-family: var(--face-display);
+  font-weight: 700;
+  font-size: var(--text-base);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+.titlebar__spacer {
+  flex: 1;
+}
+
+.install-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 46ch;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--dim);
+  font-size: var(--text-xs);
+}
+
+.install-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.install-chip__path {
+  font-family: var(--face-data);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+/* Toolbar ------------------------------------------------------------------ */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar__search {
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+
+.toolbar__spacer {
+  flex: 1;
+}
+
+.toolbar__action {
+  display: flex;
+  align-items: center;
+}
+
+.toolbar__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 210px;
+}
+
+.toolbar__progress .meter {
+  flex: 1;
+}
+
+/* Main split --------------------------------------------------------------- */
+
+.split {
+  display: grid;
+  grid-template-columns: 1fr var(--detail-width);
+  min-height: 0;
+}
+
+.split--wide {
+  grid-template-columns: 1fr;
+}
+
+.list-pane {
+  min-width: 0;
+  overflow-y: auto;
+  /* The table lays out to the pane, so it never scrolls sideways: the Needs
+     column must stay visible without the player hunting for it. */
+  overflow-x: hidden;
+}
+
+.detail-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.detail-pane__scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* Server table ------------------------------------------------------------- */
+
+.servers {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--text-base);
+}
+
+/* The Server name takes whatever is left; every other column is sized to its
+   content so nothing can push Needs out of view. */
+.servers .col-clients {
+  width: 92px;
+}
+
+.servers .col-map {
+  width: 170px;
+}
+
+.servers .col-runs {
+  width: 104px;
+}
+
+.servers .col-needs {
+  width: 148px;
+}
+
+.servers thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px var(--space-4);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.servers th button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+.servers th button:hover {
+  color: var(--dim);
+}
+
+.servers th[aria-sort] button {
+  color: var(--ink);
+}
+
+.servers th .sort-arrow {
+  font-size: 9px;
+  color: var(--brass);
+}
+
+.servers th.num,
+.servers td.num {
+  text-align: right;
+}
+
+.servers tbody td {
+  padding: 7px var(--space-4);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.servers tbody tr:hover td {
+  background: #171c22;
+}
+
+.servers tbody tr[aria-selected="true"] td {
+  background: color-mix(in srgb, var(--brass) 9%, transparent);
+}
+
+.servers tbody tr[aria-selected="true"] td:first-child {
+  box-shadow: inset 2px 0 0 var(--brass);
+}
+
+.servers tbody tr:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
+.server-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.server-address {
+  display: block;
+  margin-top: 1px;
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--faint);
+  user-select: text;
+}
+
+.occupancy {
+  font-family: var(--face-data);
+  white-space: nowrap;
+}
+
+.occupancy__clients {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.occupancy__capacity {
+  color: var(--faint);
+}
+
+.occupancy__bots {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+
+.map-cell {
+  display: block;
+  font-family: var(--face-data);
+  font-size: var(--text-sm);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runs-cell {
+  display: block;
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The needs column. Deliberately colourless: a price tag, not a verdict.
+   Only "unavailable" — the state a download cannot fix — carries colour, and
+   it is vanishingly rare in the live population. */
+.needs {
+  display: block;
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+.needs--cost {
+  font-family: var(--face-data);
+}
+
+.needs--unknown {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.needs--blocked {
+  color: var(--bad-text);
+}
+
+/* Status bar --------------------------------------------------------------- */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding: 7px var(--space-4);
+  background: var(--void);
+  border-top: 1px solid var(--line);
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+
+.statusbar strong {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.statusbar__spacer {
+  flex: 1;
+}
+
+.statusbar button {
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.statusbar button:hover {
+  color: var(--brass);
+}
+
+/* Detail pane -------------------------------------------------------------- */
+
+.detail__head {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.detail__title {
+  font-family: var(--face-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.detail__section {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.detail__section:last-child {
+  border-bottom: 0;
+}
+
+.headline-number {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.headline-number strong {
+  font-family: var(--face-data);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--brass);
+}
+
+/* Rotation groups ---------------------------------------------------------- */
+
+.rot {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.rot__group {
+  margin-top: var(--space-2);
+}
+
+.rot__group:first-child {
+  margin-top: 0;
+}
+
+.rot__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 3px 0;
+  font-size: var(--text-sm);
+}
+
+.rot__mark {
+  flex: none;
+  width: 12px;
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+}
+
+.rot__mark--ok {
+  color: var(--ok-text);
+}
+
+.rot__mark--get {
+  color: var(--brass);
+}
+
+.rot__mark--choose {
+  color: var(--warn-text);
+}
+
+.rot__mark--none {
+  color: var(--bad-text);
+}
+
+.rot__name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--face-data);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.rot__size {
+  flex: none;
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+
+.rot__file {
+  padding-left: 20px;
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+
+/* Candidate choices -------------------------------------------------------- */
+
+.choices {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 var(--space-3) 20px;
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--void);
+  font-size: var(--text-sm);
+  cursor: default;
+}
+
+.choice:hover {
+  border-color: var(--line-strong);
+}
+
+.choice:has(input:checked) {
+  border-color: color-mix(in srgb, var(--brass) 55%, transparent);
+  background: color-mix(in srgb, var(--brass) 6%, var(--void));
+}
+
+.choice:focus-within {
+  box-shadow: var(--focus);
+}
+
+.choice input {
+  margin: 3px 0 0;
+  accent-color: var(--brass);
+}
+
+.choice input:focus-visible {
+  box-shadow: none;
+}
+
+.choice__body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.choice__file {
+  font-family: var(--face-data);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.choice__meta {
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+
+/* Install progress --------------------------------------------------------- */
+
+.install-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.install-item {
+  display: grid;
+  gap: 5px;
+  font-size: var(--text-sm);
+}
+
+.install-item__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.install-item__name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--face-data);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.install-item__state {
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+/* Action bar --------------------------------------------------------------- */
+
+.actions {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--line);
+  background: var(--void);
+}
+
+.actions__row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.actions__row .btn {
+  flex: 1;
+}
+
+/* First run ---------------------------------------------------------------- */
+
+.setup-root {
+  height: 100vh;
+  overflow: auto;
+}
+
+.setup {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--space-6);
+}
+
+.setup__card {
+  width: min(560px, 100%);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--lift);
+}
+
+.setup__brand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.setup__title {
+  font-family: var(--face-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.setup__lede {
+  color: var(--dim);
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+.setup__found {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--void);
+}
+
+.setup__path {
+  font-family: var(--face-data);
+  font-size: var(--text-sm);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.setup__row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.setup__row .field {
+  flex: 1;
+}
+
+/* Narrow windows. The minimum is 920x620, so this only has to survive the
+   detail pane becoming untenable, not a phone. */
+@media (max-width: 1080px) {
+  :root {
+    --detail-width: 330px;
+  }
+
+  .servers .col-runs {
+    display: none;
+  }
+}
+
+/* Utilities.
+   Kept few and named for intent. Anything that needs more than one of these
+   probably wants a component class instead. */
+
+.stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.stack--tight {
+  display: grid;
+  gap: 6px;
+}
+
+.row-between {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.heading-sm {
+  font-size: var(--text-md);
+}
+
+.group-title {
+  margin-bottom: var(--space-1);
+}
+
+.indent {
+  padding-left: 20px;
+}
+
+.failed {
+  color: var(--bad-text);
+}

@@ -1,0 +1,365 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
+/* Reusable pieces: buttons, fields, chips, progress, dialogs. */
+
+/* Buttons ------------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 8px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--rise);
+  color: var(--ink);
+  font-family: var(--face-display);
+  font-weight: 600;
+  font-size: var(--text-base);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #2a3340;
+  border-color: var(--faint-deco);
+}
+
+.btn:disabled {
+  color: var(--faint-deco);
+  border-color: var(--line);
+  background: transparent;
+}
+
+.btn--primary {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: var(--brass-ink);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: #e6b558;
+  border-color: #e6b558;
+}
+
+.btn--primary:disabled {
+  background: var(--brass-quiet);
+  border-color: var(--brass-quiet);
+  color: #8a7642;
+}
+
+.btn--ghost {
+  background: transparent;
+}
+
+.btn--sm {
+  padding: 5px 10px;
+  font-size: var(--text-sm);
+}
+
+.btn--block {
+  width: 100%;
+}
+
+.btn--icon {
+  padding: 6px;
+  width: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--dim);
+}
+
+.btn--icon:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--rise);
+  border-color: var(--line);
+}
+
+/* Fields ------------------------------------------------------------------- */
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--void);
+}
+
+.field:focus-within {
+  border-color: var(--brass);
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--text-sm);
+  user-select: text;
+  cursor: text;
+}
+
+.field input:focus-visible {
+  box-shadow: none;
+}
+
+.field input::placeholder {
+  color: var(--faint);
+}
+
+.field__icon {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--text-sm);
+}
+
+/* Toggles ------------------------------------------------------------------ */
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--dim);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.toggle:hover {
+  color: var(--ink);
+}
+
+.toggle[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.toggle__box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 1;
+  color: transparent;
+}
+
+.toggle[aria-pressed="true"] .toggle__box {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: var(--brass-ink);
+}
+
+/* Chips -------------------------------------------------------------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  font-family: var(--face-data);
+  font-size: var(--text-xs);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.chip::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.chip--plain::before {
+  display: none;
+}
+
+.chip--ok {
+  color: var(--ok-text);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+
+.chip--warn {
+  color: var(--warn-text);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.chip--bad {
+  color: var(--bad-text);
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+}
+
+.chip--brass {
+  color: var(--brass);
+  border-color: color-mix(in srgb, var(--brass) 45%, transparent);
+}
+
+/* Key/value lists ---------------------------------------------------------- */
+
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.kv dt {
+  font-family: var(--face-display);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding-top: 1px;
+}
+
+.kv dd {
+  color: var(--dim);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.kv dd strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Progress ----------------------------------------------------------------- */
+
+.meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.meter__fill {
+  display: block;
+  height: 100%;
+  background: var(--brass);
+  transition: width 160ms linear;
+}
+
+.meter--indeterminate .meter__fill {
+  width: 34%;
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+/* Notes -------------------------------------------------------------------- */
+
+.note {
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  border-left: 2px solid var(--line-strong);
+  color: var(--faint);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.note strong {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.note--brass {
+  border-left-color: var(--brass);
+}
+
+.note--bad {
+  border-left-color: var(--bad);
+  color: var(--bad-text);
+}
+
+/* Dialog ------------------------------------------------------------------- */
+
+dialog {
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--lift);
+  max-width: min(520px, 90vw);
+}
+
+dialog::backdrop {
+  background: rgb(4 6 9 / 68%);
+}
+
+.dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog__body {
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.dialog__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--line);
+  background: var(--void);
+}
+
+/* Empty and error states --------------------------------------------------- */
+
+.placeholder {
+  display: grid;
+  gap: var(--space-3);
+  place-content: center;
+  justify-items: center;
+  padding: var(--space-7);
+  text-align: center;
+  color: var(--faint);
+}
+
+.placeholder h3 {
+  font-family: var(--face-display);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--dim);
+}
+
+.placeholder p {
+  max-width: 46ch;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.error {
+  color: var(--bad-text);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}

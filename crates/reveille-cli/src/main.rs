@@ -1138,8 +1138,8 @@ mod tests {
         BotsReported, ClientCapacity, ClientsReported, ReportedOccupancy, TargetGame,
     };
     use reveille_core::join::{
-        CompatibilityAssessment, CompatibilityState, FsGame, LaunchCommand, LaunchDialect,
-        LaunchProfile,
+        CompatibilityAssessment, CompatibilityState, CurrentMapReadiness, FsGame, LaunchCommand,
+        LaunchDialect, LaunchProfile,
     };
 
     use super::{
@@ -1209,6 +1209,7 @@ mod tests {
             assessment: CompatibilityAssessment {
                 state: CompatibilityState::CantTell,
                 preflight: None,
+                current_map: CurrentMapReadiness::Unknown,
             },
         };
 

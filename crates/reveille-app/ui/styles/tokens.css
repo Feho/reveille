@@ -1,0 +1,89 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
+/* ============================================================================
+   Reveille design tokens.
+
+   Two rules govern this palette, and both come from docs/ui.md:
+
+   1. Period flavour lives in the chrome, never in the data. The brass accent,
+      the condensed uppercase labels and the near-black ground carry the
+      identity. Tables, numbers and forms stay quiet.
+
+   2. Colour is meaning, not decoration. Green and amber are absent from the
+      server list on purpose: a status traffic light teaches people to click
+      only green, and "needs maps" is the one thing this launcher exists to
+      fix, not a defect.
+
+   Every text token below clears WCAG AA (4.5:1) against every surface it is
+   allowed on. The measured ratios are in the comments; --faint-deco is the
+   only sub-threshold value and is forbidden on text.
+   ============================================================================ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, darkest to lightest. */
+  --void: #090b0e;
+  --bg: #13171c;
+  --panel: #1a1f26;
+  --rise: #212831;
+
+  /* Rules and borders. */
+  --line: #262e38;
+  --line-strong: #323c48;
+
+  /* Text. Ratios given as bg / panel / rise. */
+  --ink: #e7e5e0; /* 14.29 / 13.16 / 11.81 */
+  --dim: #98a1ac; /*  6.88 /  6.33 /  5.68 */
+  --faint: #8a929e; /*  5.73 /  5.27 /  4.73 */
+  --faint-deco: #626b76; /*  3.33 — DECORATION ONLY. Never text. */
+
+  /* Accent. The one period colour, used for identity and the primary action. */
+  --brass: #d9a648; /* 8.14 / 7.49 / 6.72 */
+  --brass-ink: #211803; /* 7.94 against --brass */
+  --brass-quiet: #4a3a17;
+
+  /* State colours.
+     The plain token is for dots, borders and fills; the -text variant is the
+     only one allowed on type, because the plain --bad fails AA at 4.18. */
+  --ok: #5ca372;
+  --ok-text: #7fc294; /* 8.61 / 7.92 / 7.11 */
+  --warn: #d98040;
+  --warn-text: #e8a06b; /* 8.29 / 7.63 / 6.85 */
+  --bad: #c4594c;
+  --bad-text: #e08375; /* 6.57 / 6.05 / 5.43 */
+
+  /* Type.
+     Bahnschrift is the condensed face Windows 11 ships; it gives the field
+     manual voice with no bundled binary and no licence surface. Everything
+     falls back to the system UI face elsewhere. */
+  --face-display: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI",
+    system-ui, sans-serif;
+  --face-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --face-data: "Cascadia Mono", Consolas, ui-monospace, "SFMono-Regular", monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 15px;
+  --text-lg: 19px;
+  --text-xl: 25px;
+
+  /* Space. A 4px rhythm; named so layout reads as intent, not arithmetic. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 28px;
+  --space-7: 40px;
+
+  --radius: 3px;
+  --radius-lg: 5px;
+
+  --focus: 0 0 0 2px var(--void), 0 0 0 4px var(--brass);
+  --lift: 0 1px 2px rgb(0 0 0 / 40%), 0 12px 32px rgb(0 0 0 / 35%);
+
+  --titlebar-height: 38px;
+  --detail-width: 384px;
+}

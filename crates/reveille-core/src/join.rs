@@ -11,8 +11,8 @@ use thiserror::Error;
 
 use crate::content::{CatalogueResolutionPass, ResolutionOutcome};
 use crate::discovery::{Server, TargetGame};
-use crate::mapindex::MapIndex;
-use crate::preflight::{PublishedChecksum, Report, Verdict};
+use crate::mapindex::{MapIndex, MapKey};
+use crate::preflight::{MapStatus, PublishedChecksum, Report, Verdict};
 
 /// Number of distinct maps known to require different or absent local content.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -115,6 +115,7 @@ pub fn classify_server(
         return CompatibilityAssessment {
             state: classify(None, resolution),
             preflight: None,
+            current_map: CurrentMapReadiness::Unknown,
         };
     }
     let published_checksum =
@@ -128,10 +129,56 @@ pub fn classify_server(
             });
     let preflight = crate::preflight::check(index, &server.rotation, published_checksum.as_ref());
     let state = classify(Some(&preflight), resolution);
+    let current_map = current_map_readiness(Some(&preflight), server.current_map.as_deref());
     CompatibilityAssessment {
         state,
         preflight: Some(preflight),
+        current_map,
     }
+}
+
+/// Whether the map the server is running *right now* can be played.
+///
+/// This is a narrower and much more useful question than whole-rotation compatibility. A server
+/// whose rotation contains one unobtainable map is still joinable and playable until the rotation
+/// reaches that map; refusing the join outright would be a launcher inventing a problem the engine
+/// does not have. What cannot be survived is the map running at this instant being absent, because
+/// the connection fails immediately.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "readiness", rename_all = "snake_case")]
+pub enum CurrentMapReadiness {
+    /// The running map has a local provider and no checked fact differs.
+    Playable,
+    /// The running map is absent locally, or the engine would load a different BSP for it.
+    Missing,
+    /// The server published no current map, or no rotation evidence covers it.
+    Unknown,
+}
+
+/// Classify the map a server is running now against local content.
+///
+/// Returns [`CurrentMapReadiness::Unknown`] whenever the evidence is missing rather than guessing:
+/// a server that published no `mapname`, or a preflight that does not cover it, is silence and is
+/// shown as silence.
+#[must_use]
+pub fn current_map_readiness(
+    preflight: Option<&Report>,
+    current_map: Option<&str>,
+) -> CurrentMapReadiness {
+    let (Some(preflight), Some(current_map)) = (preflight, current_map) else {
+        return CurrentMapReadiness::Unknown;
+    };
+    let Some(key) = MapKey::new(current_map) else {
+        return CurrentMapReadiness::Unknown;
+    };
+    preflight
+        .maps
+        .iter()
+        .find(|result| MapKey::new(&result.map) == Some(key.clone()))
+        .map_or(CurrentMapReadiness::Unknown, |result| match result.status {
+            MapStatus::Present { .. } => CurrentMapReadiness::Playable,
+            MapStatus::ChecksumDiffers { .. } | MapStatus::Absent => CurrentMapReadiness::Missing,
+        })
 }
 
 /// Gate state together with the server evidence from which it was derived.
@@ -141,6 +188,8 @@ pub struct CompatibilityAssessment {
     pub state: CompatibilityState,
     /// Rotation preflight, absent precisely when the server published no usable rotation.
     pub preflight: Option<Report>,
+    /// Whether the map running right now is playable, judged separately from the rotation.
+    pub current_map: CurrentMapReadiness,
 }
 
 /// A validated `fs_game` mod-directory value. Empty means the selected profile's base game.
@@ -451,7 +500,7 @@ fn explanation(kind: RejectionKind, message: &str) -> RejectionExplanation {
 mod tests {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    use super::{CompatibilityState, classify_server};
+    use super::{CompatibilityState, CurrentMapReadiness, classify_server};
     use super::{
         FsGame, LaunchCommand, LaunchDialect, LaunchProfile, RejectionKind, explain_rejection,
     };
@@ -593,6 +642,32 @@ mod tests {
             classify_server(&index, &published_rotation, None).state,
             CompatibilityState::NeedsMaps { count, .. } if count.get() == 1
         ));
+    }
+
+    #[test]
+    fn current_map_readiness_is_judged_separately_from_the_rotation() {
+        let index = MapIndex::default();
+        let mut running_a_missing_map = server(vec!["obj/absent".to_owned()]);
+        running_a_missing_map.current_map = Some("obj/absent".to_owned());
+
+        let assessment = classify_server(&index, &running_a_missing_map, None);
+
+        // The rotation is unusable and so is the map running now.
+        assert_eq!(assessment.current_map, CurrentMapReadiness::Missing);
+    }
+
+    #[test]
+    fn a_server_publishing_no_current_map_is_unknown_not_missing() {
+        let index = MapIndex::default();
+        let no_current_map = server(vec!["obj/absent".to_owned()]);
+
+        let assessment = classify_server(&index, &no_current_map, None);
+
+        assert_eq!(assessment.current_map, CurrentMapReadiness::Unknown);
+        assert_eq!(
+            classify_server(&index, &server(Vec::new()), None).current_map,
+            CurrentMapReadiness::Unknown
+        );
     }
 
     fn server(rotation: Vec<String>) -> Server {

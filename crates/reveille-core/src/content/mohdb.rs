@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 use super::WantedMap;
 use super::archive::{DownloadedArchive, MohDbIntegrity, validate_package_filename};
@@ -147,6 +148,26 @@ pub struct CatalogueResolutionPass {
     pub non_results: Vec<CatalogueNonResult>,
 }
 
+/// Bytes received so far for one archive download.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DownloadProgress {
+    /// Bytes written to staging so far.
+    pub received: u64,
+    /// Length the server declared, or `None` when it declared none.
+    pub declared: Option<u64>,
+}
+
+/// One map's outcome, reported by [`MohDbClient::resolve_all_reporting`] as it lands.
+#[derive(Clone, Copy, Debug)]
+pub struct CatalogueProgress<'a> {
+    /// Zero-based position in the wanted list.
+    pub index: usize,
+    /// Total number of wanted maps in this pass.
+    pub of: usize,
+    /// The resolution, or the recorded non-result for this one lookup.
+    pub resolved: Result<&'a CatalogueResolution, &'a CatalogueNonResult>,
+}
+
 /// Configured moh-db client with an identifying user agent and request deadline.
 #[derive(Clone, Debug)]
 pub struct MohDbClient {
@@ -217,14 +238,42 @@ impl MohDbClient {
 
     /// Resolve every wanted map independently, preserving timeouts, 403s, and malformed replies.
     pub async fn resolve_all(&self, wanted: &[WantedMap]) -> CatalogueResolutionPass {
+        self.resolve_all_reporting(wanted, |_| {}).await
+    }
+
+    /// Resolve every wanted map, reporting each result as soon as it lands.
+    ///
+    /// `report` is called once per entry in `wanted`, in order, before the pass returns. Lookups
+    /// are sequential, so a caller can show real progress through a long shopping list instead of
+    /// one opaque wait. The returned pass is identical to [`resolve_all`](Self::resolve_all)'s.
+    pub async fn resolve_all_reporting(
+        &self,
+        wanted: &[WantedMap],
+        mut report: impl FnMut(CatalogueProgress<'_>),
+    ) -> CatalogueResolutionPass {
         let mut pass = CatalogueResolutionPass::default();
-        for map in wanted {
+        for (index, map) in wanted.iter().enumerate() {
             match self.resolve_one(map).await {
-                Ok(resolution) => pass.resolutions.push(resolution),
-                Err(error) => pass.non_results.push(CatalogueNonResult {
-                    wanted: map.clone(),
-                    reason: error.into(),
-                }),
+                Ok(resolution) => {
+                    report(CatalogueProgress {
+                        index,
+                        of: wanted.len(),
+                        resolved: Ok(&resolution),
+                    });
+                    pass.resolutions.push(resolution);
+                }
+                Err(error) => {
+                    let non_result = CatalogueNonResult {
+                        wanted: map.clone(),
+                        reason: error.into(),
+                    };
+                    report(CatalogueProgress {
+                        index,
+                        of: wanted.len(),
+                        resolved: Err(&non_result),
+                    });
+                    pass.non_results.push(non_result);
+                }
             }
         }
         pass
@@ -302,6 +351,24 @@ pub async fn download_mohdb_archive(
     candidate: &CatalogueCandidate,
     staging_directory: &Path,
 ) -> Result<DownloadedArchive<MohDbIntegrity>, MohDbError> {
+    download_mohdb_archive_reporting(client, candidate, staging_directory, |_| {}).await
+}
+
+/// Download a moh-db name match, reporting bytes received as they arrive.
+///
+/// The body is streamed to the staging file rather than buffered whole, so a large archive costs
+/// a constant amount of memory and the caller can show real progress. `report` receives the bytes
+/// written so far and the length the server declared, which is `None` when it declared none.
+///
+/// # Errors
+///
+/// Same as [`download_mohdb_archive`].
+pub async fn download_mohdb_archive_reporting(
+    client: &MohDbClient,
+    candidate: &CatalogueCandidate,
+    staging_directory: &Path,
+    mut report: impl FnMut(DownloadProgress),
+) -> Result<DownloadedArchive<MohDbIntegrity>, MohDbError> {
     validate_package_filename(&candidate.filename).map_err(MohDbError::Archive)?;
     fs::create_dir_all(staging_directory)
         .await
@@ -319,26 +386,49 @@ pub async fn download_mohdb_archive(
     if !response.status().is_success() {
         return Err(MohDbError::Status(response.status()));
     }
-    let bytes = response.bytes().await.map_err(classify_request_error)?;
-    let actual_size = u64::try_from(bytes.len()).map_err(|_| MohDbError::SizeOverflow)?;
-    if actual_size != candidate.file_size.get() {
-        return Err(MohDbError::SizeMismatch {
-            published: candidate.file_size,
-            actual: FileSize::new(actual_size),
-        });
-    }
-    let digest = Sha256::digest(&bytes);
+    let declared = response.content_length();
     let temporary =
         NamedTempFile::new_in(staging_directory).map_err(|source| MohDbError::Staging {
             path: staging_directory.to_path_buf(),
             source,
         })?;
-    fs::write(temporary.path(), &bytes)
-        .await
-        .map_err(|source| MohDbError::Staging {
+    let mut hasher = Sha256::new();
+    let mut received: u64 = 0;
+    let mut response = response;
+    {
+        let mut file =
+            fs::File::create(temporary.path())
+                .await
+                .map_err(|source| MohDbError::Staging {
+                    path: temporary.path().to_path_buf(),
+                    source,
+                })?;
+        report(DownloadProgress { received, declared });
+        while let Some(chunk) = response.chunk().await.map_err(classify_request_error)? {
+            hasher.update(&chunk);
+            file.write_all(&chunk)
+                .await
+                .map_err(|source| MohDbError::Staging {
+                    path: temporary.path().to_path_buf(),
+                    source,
+                })?;
+            received = received
+                .checked_add(chunk.len() as u64)
+                .ok_or(MohDbError::SizeOverflow)?;
+            report(DownloadProgress { received, declared });
+        }
+        file.flush().await.map_err(|source| MohDbError::Staging {
             path: temporary.path().to_path_buf(),
             source,
         })?;
+    }
+    if received != candidate.file_size.get() {
+        return Err(MohDbError::SizeMismatch {
+            published: candidate.file_size,
+            actual: FileSize::new(received),
+        });
+    }
+    let digest = hasher.finalize();
     let target = staging_directory.join(&candidate.filename);
     temporary
         .persist_noclobber(&target)

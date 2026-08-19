@@ -16,8 +16,9 @@ pub use archive::{
 };
 pub use mohdb::{
     CatalogueCandidate, CatalogueNonResult, CatalogueNonResultReason, CataloguePage,
-    CatalogueResolution, CatalogueResolutionPass, FileSize, MohDbClient, MohDbError,
-    ResolutionOutcome, download_mohdb_archive, resolve_candidates,
+    CatalogueProgress, CatalogueResolution, CatalogueResolutionPass, DownloadProgress, FileSize,
+    MohDbClient, MohDbError, ResolutionOutcome, download_mohdb_archive,
+    download_mohdb_archive_reporting, resolve_candidates,
 };
 pub use pakradar::{
     Md5Digest, PakRadarEntry, PakRadarError, download_pakradar_archive, fetch_filelist,
