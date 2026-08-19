@@ -91,11 +91,14 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults })
     actionSlot,
   );
   const tbody = el("tbody", { onkeydown: (event) => onRowKey(event, onSelect) });
+  // Header cells are built once and their sort state written in place. Rebuilding them left the
+  // arrow and the highlight frozen on whichever column was sorted when the view was created.
+  const headers = COLUMNS.map(headerCell);
   const table = el(
     "table",
     { className: "servers" },
     el("caption", { className: "sr-only" }, "Servers answering now"),
-    el("thead", null, el("tr", null, COLUMNS.map(headerCell))),
+    el("thead", null, el("tr", null, headers.map((header) => header.th))),
     tbody,
   );
   const listPane = el("div", { className: "list-pane" }, table);
@@ -105,6 +108,16 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults })
   let lastSignature = null;
   let lastPainted = 0;
   let pending = null;
+
+  const paintHeaders = () => {
+    for (const { column, th, arrow } of headers) {
+      const active = column.sortable && state.sort.column === column.key;
+      const ascending = state.sort.direction === "asc";
+      if (active) th.setAttribute("aria-sort", ascending ? "ascending" : "descending");
+      else th.removeAttribute("aria-sort");
+      if (arrow) arrow.textContent = active ? (ascending ? "▲" : "▼") : "";
+    }
+  };
 
   const paintAction = () => {
     const running = state.browse.running;
@@ -149,6 +162,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults })
     hasPeople.setAttribute("aria-pressed", state.filters.hasPeople ? "true" : "false");
     hideBlocked.setAttribute("aria-pressed", state.filters.hideBlocked ? "true" : "false");
     if (search.value !== state.filters.query) search.value = state.filters.query;
+    paintHeaders();
     paintAction();
     fill(statusbar, ...statusbarContents(onShowNonResults));
     live.textContent = liveText();
@@ -187,17 +201,16 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults })
   };
 }
 
+/** One header cell, plus the nodes whose sort state is written on every render. */
 function headerCell(column) {
-  const active = state.sort.column === column.key;
   const attrs = {
     scope: "col",
     className: [column.numeric ? "num" : null, column.className].filter(Boolean).join(" ") || null,
   };
-  if (column.sortable && active) {
-    attrs["aria-sort"] = state.sort.direction === "asc" ? "ascending" : "descending";
-  }
-  if (!column.sortable) return el("th", attrs, column.label);
-  return el(
+  if (!column.sortable) return { column, th: el("th", attrs, column.label), arrow: null };
+
+  const arrow = el("span", { className: "sort-arrow" });
+  const th = el(
     "th",
     attrs,
     el(
@@ -215,9 +228,10 @@ function headerCell(column) {
           }),
       },
       column.label,
-      active && el("span", { className: "sort-arrow" }, state.sort.direction === "asc" ? "▲" : "▼"),
+      arrow,
     ),
   );
+  return { column, th, arrow };
 }
 
 function toggle(label, onclick) {
@@ -237,7 +251,7 @@ function toggle(label, onclick) {
 
 function row(item, onSelect) {
   const { clients, bots, capacity } = occupancy(item.server);
-  const needs = needsCell(item.compatibility.state);
+  const needs = needsCell(item.compatibility);
   const choose = () => {
     if (state.selected !== item.address) onSelect(item.address);
   };

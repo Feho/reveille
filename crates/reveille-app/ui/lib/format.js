@@ -100,8 +100,27 @@ export function mapName(value) {
  * nothing to the column; extra content is priced, not flagged; an unpublished
  * rotation is reported as a fact about the server. Only the state a download
  * cannot fix is coloured.
+ *
+ * A server that published no rotation is still running something, and if that map
+ * is missing it costs one download — worth pricing, because it is the difference
+ * between joining and being dropped on arrival. The tooltip says the rest of the
+ * rotation remains unknown, so the figure is never read as complete.
  */
-export function needsCell(state) {
+export function needsCell(assessment) {
+  const state = assessment?.state;
+  if (
+    state?.state !== "compatible" &&
+    state?.state !== "needs_maps" &&
+    state?.state !== "no_source" &&
+    assessment?.current_map?.readiness === "missing"
+  ) {
+    return {
+      text: "+ 1 map",
+      kind: "cost",
+      title:
+        "This server publishes no rotation, but the map it is running now is not on disk. Reveille can fetch that one; what comes after it is unknown.",
+    };
+  }
   switch (state?.state) {
     case "compatible":
       return null;
@@ -145,13 +164,13 @@ export function stateName(state) {
 export function stateExplanation(state) {
   switch (state?.state) {
     case "compatible":
-      return "Every map this server published is on disk. The server still decides whether you get in.";
+      return "Every map this server published, including the one it is running now, is on disk. The server still decides whether you get in.";
     case "needs_maps":
       return "This server's rotation uses maps you do not have. Reveille can fetch them before you join.";
     case "no_source":
       return "At least one map in the rotation is not in any catalogue Reveille can reach.";
     default:
-      return "This server published no map list, so there is nothing to check in advance.";
+      return "This server published no map list. Only the map it is running now could be checked.";
   }
 }
 

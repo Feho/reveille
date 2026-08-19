@@ -703,6 +703,29 @@ Re-verified live against the same install: the sweep answered 106 of 195, Stop r
 early", a needs-maps server previewed mid-sweep without error, and `<[TFC]> Sniper Only OBJ` again
 reproduced 7 of 14 present with 9.1 MB across 4 files and 2 awaiting a choice.
 
+**Third review, two issues, both fixed.**
+
+*Only the rotation was checked, not the map running now.* `classify_server` preflighted
+`server.rotation` and nothing else, so a map the server was running but had not listed in
+`sv_maplist` was invisible: it did not count towards `Needs N maps`, it never entered the shopping
+list, and `current_map_readiness` returned `Unknown` because the preflight held no entry for it.
+Worst case was a server publishing no rotation at all — the shell reported `Can't tell`, showed
+nothing to do, and offered a join that the engine would have dropped on arrival. The preflight now
+covers `sv_maplist` ∪ `mapname`, deduplicated by `MapKey`, so the running map counts, resolves and
+downloads like any other. The rotation verdict is unchanged in kind: a server that published no
+rotation stays `Can't tell`, because one checked map is not a rotation check — but its readiness is
+now known and its map is fetchable, and the detail pane heads the section **Maps** with "No rotation
+published. Only the map running now was checked."
+
+Live: `=MB= Revival Mie` publishes no rotation and was running `dm/dm_stanalie`, absent locally.
+Before, it read "not published" with nothing to do. It now prices `+ 1 map` in the list and offers
+"Get 5.0 MB & join".
+
+*Clicking a column sorted the rows but the arrow and highlight stayed on Map now.* The header cells
+were built once and read `state.sort` at construction, so both froze on whatever the saved sort was
+at boot. They are now written in place on every render, the same rule the toolbar already follows
+and for the same reason.
+
 ---
 
 ## Verification overall

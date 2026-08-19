@@ -43,12 +43,13 @@ impl fmt::Display for MapsNeeded {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum CompatibilityState {
-    /// Nothing in the server-published rotation that Reveille could check is wrong.
+    /// Nothing the server published — rotation or map running now — that Reveille could check is
+    /// wrong.
     ///
     /// This does not predict admission: bans, capacity, and ping are evaluated later by
     /// `SV_DirectConnect`.
     Compatible,
-    /// The published rotation proves that local content is absent or differs.
+    /// What the server published proves that local content is absent or differs.
     NeedsMaps {
         /// Number of affected distinct maps.
         count: MapsNeeded,
@@ -102,6 +103,32 @@ pub fn classify(
     }
 }
 
+/// Every map this server proves you need on disk: its published rotation plus the map it is
+/// running now.
+///
+/// The current map is not always in `sv_maplist`. An admin can load a map directly, and a server
+/// can publish `mapname` while publishing no rotation at all — in which case the rotation is silent
+/// but the one map that decides whether the connection survives arrival is not. Checking only the
+/// rotation therefore misses the case that matters most.
+///
+/// [`crate::preflight::check`] deduplicates by [`MapKey`], so a current map already in the rotation
+/// is checked once and keeps its published position.
+fn checked_maps(server: &Server) -> Vec<&str> {
+    let mut maps = server
+        .rotation
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if let Some(current) = server
+        .current_map
+        .as_deref()
+        .filter(|current| MapKey::new(current).is_some())
+    {
+        maps.push(current);
+    }
+    maps
+}
+
 /// Preflight and classify one complete discovery model.
 ///
 /// An empty rotation is treated as unpublished evidence, never as an empty compatible rotation.
@@ -111,7 +138,8 @@ pub fn classify_server(
     server: &Server,
     resolution: Option<&CatalogueResolutionPass>,
 ) -> CompatibilityAssessment {
-    if server.rotation.is_empty() {
+    let checked = checked_maps(server);
+    if checked.is_empty() {
         return CompatibilityAssessment {
             state: classify(None, resolution),
             preflight: None,
@@ -127,8 +155,16 @@ pub fn classify_server(
                 map: map.clone(),
                 checksum,
             });
-    let preflight = crate::preflight::check(index, &server.rotation, published_checksum.as_ref());
-    let state = classify(Some(&preflight), resolution);
+    let preflight = crate::preflight::check(index, &checked, published_checksum.as_ref());
+    // The four states describe the rotation, so a server that published none stays `Can't tell`
+    // even though the map it is running now was checked. Saying `Compatible` on the strength of one
+    // map would claim a rotation check that never happened; the current map's readiness is reported
+    // separately, and the preflight below still covers it so it can be fetched.
+    let state = if server.rotation.is_empty() {
+        classify(None, resolution)
+    } else {
+        classify(Some(&preflight), resolution)
+    };
     let current_map = current_map_readiness(Some(&preflight), server.current_map.as_deref());
     CompatibilityAssessment {
         state,
@@ -156,6 +192,9 @@ pub enum CurrentMapReadiness {
 }
 
 /// Classify the map a server is running now against local content.
+///
+/// The preflight passed here must be one that covers the current map — [`classify_server`] always
+/// checks it, whether or not the rotation mentions it.
 ///
 /// Returns [`CurrentMapReadiness::Unknown`] whenever the evidence is missing rather than guessing:
 /// a server that published no `mapname`, or a preflight that does not cover it, is silence and is
@@ -186,7 +225,8 @@ pub fn current_map_readiness(
 pub struct CompatibilityAssessment {
     /// Exactly one of the four player-visible states.
     pub state: CompatibilityState,
-    /// Rotation preflight, absent precisely when the server published no usable rotation.
+    /// Content preflight over the published rotation *and* the map running now. Absent precisely
+    /// when the server published neither.
     pub preflight: Option<Report>,
     /// Whether the map running right now is playable, judged separately from the rotation.
     pub current_map: CurrentMapReadiness,
@@ -668,6 +708,68 @@ mod tests {
             classify_server(&index, &server(Vec::new()), None).current_map,
             CurrentMapReadiness::Unknown
         );
+    }
+
+    #[test]
+    fn the_map_running_now_is_checked_even_when_the_rotation_omits_it() {
+        let index = MapIndex::default();
+        let mut off_rotation = server(vec!["obj/absent".to_owned()]);
+        off_rotation.current_map = Some("obj/also_absent".to_owned());
+
+        let assessment = classify_server(&index, &off_rotation, None);
+
+        // Both maps are needed, and the one running now is what decides the join.
+        assert!(matches!(
+            assessment.state,
+            CompatibilityState::NeedsMaps { count, .. } if count.get() == 2
+        ));
+        assert_eq!(assessment.current_map, CurrentMapReadiness::Missing);
+        let checked = assessment.preflight.expect("preflight");
+        assert_eq!(
+            checked
+                .maps
+                .iter()
+                .map(|map| map.map.as_str())
+                .collect::<Vec<_>>(),
+            ["obj/absent", "obj/also_absent"]
+        );
+    }
+
+    #[test]
+    fn a_current_map_inside_the_rotation_is_checked_once() {
+        let index = MapIndex::default();
+        let mut on_rotation = server(vec!["obj/absent".to_owned(), "obj/other".to_owned()]);
+        // The same map, spelled the way a server reports `mapname` rather than `sv_maplist`.
+        on_rotation.current_map = Some("maps/OBJ/Absent.bsp".to_owned());
+
+        let assessment = classify_server(&index, &on_rotation, None);
+
+        assert!(matches!(
+            assessment.state,
+            CompatibilityState::NeedsMaps { count, .. } if count.get() == 2
+        ));
+        let checked = assessment.preflight.expect("preflight");
+        assert_eq!(checked.maps.len(), 2);
+        // The rotation's spelling is the one kept.
+        assert_eq!(checked.maps[0].map, "obj/absent");
+    }
+
+    #[test]
+    fn an_unpublished_rotation_still_checks_the_map_running_now() {
+        let index = MapIndex::default();
+        let mut silent_rotation = server(Vec::new());
+        silent_rotation.current_map = Some("obj/absent".to_owned());
+
+        let assessment = classify_server(&index, &silent_rotation, None);
+
+        // The rotation was not published, so no rotation verdict is claimed...
+        assert_eq!(assessment.state, CompatibilityState::CantTell);
+        // ...but the map that decides whether the connection survives arrival is known, and is
+        // covered by the preflight so it can still be fetched.
+        assert_eq!(assessment.current_map, CurrentMapReadiness::Missing);
+        let checked = assessment.preflight.expect("preflight");
+        assert_eq!(checked.maps.len(), 1);
+        assert_eq!(checked.maps[0].map, "obj/absent");
     }
 
     fn server(rotation: Vec<String>) -> Server {

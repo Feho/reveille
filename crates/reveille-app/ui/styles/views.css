@@ -201,6 +201,12 @@
   color: var(--brass);
 }
 
+/* The arrow is always in the DOM so its column can be updated in place; an unsorted column must
+   not pay for the button's gap. */
+.servers th .sort-arrow:empty {
+  display: none;
+}
+
 .servers th.num,
 .servers td.num {
   text-align: right;

@@ -168,15 +168,22 @@ function resolvingMeter() {
   );
 }
 
-/** Group the rotation the way a decision needs it, not the way the wire sent it. */
+/**
+ * Group what this server needs the way a decision needs it, not the way the wire sent it.
+ *
+ * The preflight covers the published rotation *and* the map running now, which is why this is
+ * headed "Maps" rather than "Rotation": a server can be running a map its own `sv_maplist` never
+ * mentions, or publish no rotation at all while still telling you what it is running.
+ */
 function rotationSection(row, assessment, preview) {
   const maps = assessment.preflight?.maps ?? [];
+  const noRotation = (row.server.rotation?.length ?? 0) === 0;
   if (!maps.length) {
     return el(
       "div",
       { className: "detail__section" },
-      el("p", { className: "label" }, "Rotation"),
-      el("p", { className: "quiet" }, "This server publishes no map list."),
+      el("p", { className: "label" }, "Maps"),
+      el("p", { className: "quiet" }, "This server publishes neither a map list nor a current map."),
     );
   }
 
@@ -201,7 +208,10 @@ function rotationSection(row, assessment, preview) {
   return el(
     "div",
     { className: "detail__section" },
-    el("p", { className: "label" }, "Rotation"),
+    el("p", { className: "label" }, "Maps"),
+    noRotation
+      ? el("p", { className: "quiet" }, "No rotation published. Only the map running now was checked.")
+      : null,
     el(
       "div",
       { className: "rot" },

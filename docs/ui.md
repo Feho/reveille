@@ -48,8 +48,14 @@ So the **Needs** column states a price instead of passing a judgement:
 | `NeedsMaps { count }` | `+ 7 maps` | none (default ink) |
 | `NoSource { count }` | `7 maps unavailable` | `--bad-text`, the only coloured cell |
 | `CantTell` | `not published` | `--faint`, italic |
+| `CantTell`, current map absent | `+ 1 map` | none (default ink) |
 
 Readiness is the **absence** of work, not an award. A ready server earns a blank cell.
+
+The last row exists because a server that publishes no rotation is still running *something*. If
+that map is not on disk the join is dropped on arrival, and one download fixes it — so it is priced
+like any other work. The cell's `title` says the rest of the rotation remains unknown, so the figure
+is never read as a complete bill.
 
 Every cell carries a `title` with the full explanation, so the short label never has to carry the
 whole meaning.
@@ -85,7 +91,7 @@ There is **one** primary surface. The three-screen wizard was removed.
 │ SERVER      CLIENTS  MAP NOW  RUNS  NEEDS │  detail pane      │
 │ harzCore      40/64  dm/mohdm6  1.11      │  server facts     │
 │ <[TFC]>        1/32  obj/bluts  1.11  +7 maps │  join check   │
-│ [FORTE]       21/32  dm/mohdm6  1.11  not published │ rotation│
+│ [FORTE]       21/32  dm/mohdm6  1.11  not published │ maps     │
 ├───────────────────────────────────────┼──────────────────────┤
 │ 106 of 190 answered · 108 bots · 84 not listed │ [Join]       │  status/actions
 └───────────────────────────────────────┴──────────────────────┘
@@ -116,6 +122,17 @@ Breaking one is a bug.
 | A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
 
 ## 5. The join gate
+
+**Everything a server publishes about its content is checked — the rotation *and* the map it is
+running now.** `classify_server` preflights `sv_maplist` plus `mapname`, deduplicated by `MapKey`,
+because the two are not the same set: an admin can load a map directly, and a server can publish a
+current map while publishing no rotation at all. Checking only the rotation missed the case that
+matters most, and left the running map out of the shopping list so it could not even be fetched.
+
+A server that published no rotation stays `Can't tell` even so. Its one checked map is real
+evidence, but calling it `Compatible` would claim a rotation check that never happened. The detail
+pane heads the section **Maps**, not Rotation, and says "No rotation published. Only the map running
+now was checked."
 
 **The gate is about the map running now, not the whole rotation.**
 
@@ -233,6 +250,11 @@ not reintroduce a blanket rebuild of any region containing a text input.**
   duplicate game endpoints are demoted only once the sweep completes, so retention stays
   deterministic. The payload returned at the end replaces the streamed list with the authoritative
   one. A consumer that shows streamed rows must reconcile against it.
+- **The table header is written in place, never rebuilt.** Its sort arrow and `aria-sort` come from
+  `state.sort` on every render. Building the cells once and reading `state.sort` at construction
+  froze both on whichever column happened to be sorted when the view was created, so clicking a
+  header re-sorted the rows while the arrow stayed put. The same rule as the toolbar, for the same
+  reason.
 - **`version` vs `game_version`**: the list uses `game_version` (`1.11`, `1.12+0.83.0`) because it
   is short and comparable. `version` is a sentence — "Medal of Honor Allied Assault 1.11 win-x86
   Mar 5 2002" — which truncates to "Medal of Honor Allied" in every row and distinguishes nothing.
