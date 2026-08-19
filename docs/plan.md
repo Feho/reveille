@@ -441,11 +441,27 @@ Report Part A complete on its own rather than holding the milestone open for the
 - Tauri shell implementing the three designed screens (first run, server browser, join
   preflight), newcomer-first with power features one layer down.
 - Journeys A, B and C end to end.
-- **Timed test on a real person** who has never played MOHAA: ten minutes from assets on disk
-  to first spawn, no forum, no Discord, no hints.
-- Signing and distribution resolved **before** shipping, not after — an unsigned binary that
-  scans drives then opens UDP sockets to dozens of hosts will attract SmartScreen, and the
-  primary user is precisely the one who will not click through a blue panel.
+- **Working end to end on the owner's Windows machine.** That is v1's bar (decision, 19 Aug
+  2026). Not packaged, not signed, not distributed.
+
+**Signing and distribution: deferred to shipping, by decision.** The chosen channels are winget
+and possibly the Microsoft Store, which is consistent with what the blueprint already argued —
+let the package manager carry the reputation rather than buying a certificate. Store submission
+signs the package as part of the process, so that channel resolves signing rather than deferring
+it. Nothing here blocks M6.
+
+> **Re-check the install target if the Microsoft Store channel is taken.** Store distribution
+> means MSIX, which sandboxes filesystem access; writing pk3s into `C:\GOG Games\...\main\`
+> from a packaged app may be virtualised or refused. The probe-then-fall-back policy should
+> survive it, but it has not been tested under MSIX and should be before a Store submission.
+> winget carries no such constraint — it just fetches a publisher-hosted installer.
+
+**The ten-minute timed test moves from v1 to ship.** *"Minutes from valid game assets on disk to
+being in a game with other people, measured on someone who has never played MOHAA"* remains the
+product's success criterion, but it cannot be run against something that only works on one
+machine. v1 proves the pipeline composes; the timed test gates shipping. Keep building toward it
+— the newcomer-first screen design, the four honest states, no jargon — because retrofitting
+those after a developer-shaped v1 is how launchers end up developer-shaped.
 
 ---
 
