@@ -84,16 +84,31 @@ const DATA_DIRECTORIES: [(&str, Product); 3] = [
     ("maintt", Product::Breakthrough),
 ];
 
-const CLIENT_BINARIES: [&str; 5] = [
+const CLIENT_BINARIES: [&str; 7] = [
     "mohaa.exe",
     "mohaas.exe",
     "mohaab.exe",
+    "moh_spearhead.exe",
+    "moh_breakthrough.exe",
     "openmohaa.exe",
     "openmohaa",
 ];
 
-// Deliberately empty until real retail/GOG/EA App/OpenMoHAA binaries are verified on Windows.
-const KNOWN_BINARY_VERSIONS: [(&str, &str); 0] = [];
+// Measured from a French retail-disc install on Windows, 19 Aug 2026.
+const KNOWN_BINARY_VERSIONS: [(&str, &str); 3] = [
+    (
+        "ed028e97cb56ea3a89a821635b07e0ed87bcbab751b6e13e88edc9c02dfc88cc",
+        "Medal of Honor: Allied Assault 1.11 (retail disc, French)",
+    ),
+    (
+        "74de88a1721277d509172966600fd00c34a71d4003ea008af48e230468154ac6",
+        "Medal of Honor: Allied Assault Spearhead 2.15 (retail disc, French)",
+    ),
+    (
+        "7a6ee79a01b82dce2fce36e8eb474cc32718bccb58b039847798c222e0113ccf",
+        "Medal of Honor: Allied Assault Breakthrough 2.40 (retail disc, French)",
+    ),
+];
 
 /// Identify a user-selected install root without applying platform discovery policy.
 ///
@@ -124,11 +139,7 @@ pub fn identify(path: impl AsRef<Path>) -> Result<Installation, Error> {
         let binary = root.join(file_name);
         if binary.is_file() {
             let sha256 = hash_file(&binary)?;
-            let known_version = KNOWN_BINARY_VERSIONS
-                .iter()
-                .find_map(|(known_hash, version)| {
-                    (*known_hash == sha256).then(|| (*version).into())
-                });
+            let known_version = known_version(&sha256).map(str::to_owned);
             binaries.push(BinaryFingerprint {
                 path: binary,
                 sha256,
@@ -151,6 +162,12 @@ pub fn identify(path: impl AsRef<Path>) -> Result<Installation, Error> {
         binaries,
         identification,
     })
+}
+
+fn known_version(hash: &str) -> Option<&'static str> {
+    KNOWN_BINARY_VERSIONS
+        .iter()
+        .find_map(|(known_hash, version)| (*known_hash == hash).then_some(*version))
 }
 
 fn hash_file(path: &Path) -> Result<String, Error> {
@@ -180,7 +197,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{Error, IdentificationMethod, Product, identify};
+    use super::{Error, IdentificationMethod, Product, identify, known_version};
 
     #[test]
     fn identifies_products_and_exposes_an_unknown_binary_hash() {
@@ -225,5 +242,13 @@ mod tests {
             identify(temporary.path()),
             Err(Error::NoDataDirectories(_))
         ));
+    }
+
+    #[test]
+    fn identifies_the_measured_retail_disc_hash() {
+        assert_eq!(
+            known_version("ed028e97cb56ea3a89a821635b07e0ed87bcbab751b6e13e88edc9c02dfc88cc"),
+            Some("Medal of Honor: Allied Assault 1.11 (retail disc, French)")
+        );
     }
 }

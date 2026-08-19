@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Pure parsing of exported Windows registry text and EA App/Origin installation evidence.
+//! Registry installation evidence.
 //!
-//! Reading the live registry remains Windows-only work. This module consumes the same key/value
-//! shape from fixtures or a future registry adapter.
+//! The parsers and discovery functions remain platform-neutral. On Windows, [`read_live_hives`]
+//! translates string values from the live registry into the same [`RegistryKey`] shape.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -168,6 +168,128 @@ pub fn discover_ea_install_roots(keys: &[RegistryKey]) -> Vec<EaInstallRoot> {
         .collect()
 }
 
+/// Extract the War Chest root from the GOG registry key used by the engine.
+#[must_use]
+pub fn discover_gog_install_root(keys: &[RegistryKey]) -> Option<PathBuf> {
+    keys.iter().find_map(|key| {
+        key.path
+            .eq_ignore_ascii_case("HKEY_LOCAL_MACHINE\\SOFTWARE\\GOG.com\\Games\\1441704920")
+            .then(|| key.value("PATH"))
+            .flatten()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(|path| PathBuf::from(path.trim_end_matches(['\\', '/'])))
+    })
+}
+
+/// Read relevant installation keys from the live Windows registry.
+///
+/// Both registry views are enumerated explicitly. The GOG key is read from the 32-bit view, as
+/// `OpenMoHAA` does in `Sys_GogPath` (`code/sys/sys_win32.c:191-219`). Missing roots and entries are
+/// normal and produce no key.
+///
+/// # Errors
+///
+/// Returns an error when a present registry root or one of its children cannot be read.
+#[cfg(windows)]
+pub fn read_live_hives() -> Result<Vec<RegistryKey>, LiveRegistryError> {
+    use winreg::RegKey;
+    use winreg::enums::{
+        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+    };
+
+    const UNINSTALL: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+    const ORIGIN: &str = "SOFTWARE\\Electronic Arts\\EA Games";
+    const GOG: &str = "SOFTWARE\\GOG.com\\Games\\1441704920";
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let mut keys = Vec::new();
+    for (hive, hive_name) in [(&hklm, "HKEY_LOCAL_MACHINE"), (&hkcu, "HKEY_CURRENT_USER")] {
+        for view in [KEY_WOW64_64KEY, KEY_WOW64_32KEY] {
+            read_children(hive, hive_name, UNINSTALL, KEY_READ | view, &mut keys)?;
+            read_children(hive, hive_name, ORIGIN, KEY_READ | view, &mut keys)?;
+        }
+    }
+    read_one(
+        &hklm,
+        "HKEY_LOCAL_MACHINE",
+        GOG,
+        KEY_READ | KEY_WOW64_32KEY,
+        &mut keys,
+    )?;
+    Ok(keys)
+}
+
+#[cfg(windows)]
+fn read_children(
+    hive: &winreg::RegKey,
+    hive_name: &str,
+    path: &str,
+    flags: u32,
+    keys: &mut Vec<RegistryKey>,
+) -> Result<(), LiveRegistryError> {
+    use std::io::ErrorKind;
+
+    let root = match hive.open_subkey_with_flags(path, flags) {
+        Ok(root) => root,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(LiveRegistryError::Read {
+                path: path.into(),
+                source,
+            });
+        }
+    };
+    for child in root.enum_keys() {
+        let child = child.map_err(|source| LiveRegistryError::Read {
+            path: path.into(),
+            source,
+        })?;
+        let child_path = format!("{path}\\{child}");
+        read_one(hive, hive_name, &child_path, flags, keys)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn read_one(
+    hive: &winreg::RegKey,
+    hive_name: &str,
+    path: &str,
+    flags: u32,
+    keys: &mut Vec<RegistryKey>,
+) -> Result<(), LiveRegistryError> {
+    use std::io::ErrorKind;
+    use winreg::types::FromRegValue;
+
+    let key = match hive.open_subkey_with_flags(path, flags) {
+        Ok(key) => key,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(LiveRegistryError::Read {
+                path: path.into(),
+                source,
+            });
+        }
+    };
+    let mut values = BTreeMap::new();
+    for value in key.enum_values() {
+        let (name, raw) = value.map_err(|source| LiveRegistryError::Read {
+            path: path.into(),
+            source,
+        })?;
+        if let Ok(value) = String::from_reg_value(&raw) {
+            values.insert(name, value);
+        }
+    }
+    keys.push(RegistryKey {
+        path: format!("{hive_name}\\{path}"),
+        values,
+    });
+    Ok(())
+}
+
 /// Identify candidates by filesystem evidence, retaining stale registry entries as non-results.
 ///
 /// Edition names are never passed as product evidence: only `main`, `mainta`, and `maintt`
@@ -229,17 +351,34 @@ pub enum RegistryError {
     MalformedLine { line: usize },
 }
 
+/// Failure while translating a live registry hive into portable registry evidence.
+#[cfg(windows)]
+#[derive(Debug, Error)]
+pub enum LiveRegistryError {
+    /// A present key could not be opened or enumerated.
+    #[error("could not read registry key {path}")]
+    Read {
+        /// Registry path that failed.
+        path: String,
+        /// Underlying Windows registry error.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
 
     use tempfile::TempDir;
 
     use super::{
-        EaInstallSource, discover_ea_install_roots, identify_ea_installations,
-        parse_registry_export,
+        EaInstallSource, RegistryKey, discover_ea_install_roots, discover_gog_install_root,
+        identify_ea_installations, parse_registry_export,
     };
     use crate::install::Product;
+    use std::collections::BTreeMap;
 
     #[test]
     fn parses_ea_app_uninstall_and_origin_install_dir_layouts() {
@@ -279,5 +418,18 @@ mod tests {
             vec![Product::AlliedAssault]
         );
         assert!(discovery.skipped.is_empty());
+    }
+
+    #[test]
+    fn extracts_only_the_engine_gog_product_key() {
+        let keys = vec![RegistryKey {
+            path: "HKEY_LOCAL_MACHINE\\SOFTWARE\\GOG.com\\Games\\1441704920".into(),
+            values: BTreeMap::from([("PATH".into(), "C:\\GOG Games\\MOHAA\\".into())]),
+        }];
+
+        assert_eq!(
+            discover_gog_install_root(&keys),
+            Some(PathBuf::from("C:\\GOG Games\\MOHAA"))
+        );
     }
 }

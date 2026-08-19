@@ -16,6 +16,8 @@ use reveille_core::join::{
 use reveille_core::mapindex::MapIndex;
 use serde::Serialize;
 
+mod windows;
+
 #[derive(Debug, Parser)]
 #[command(name = "reveille", version, about = "Headless MOHAA launcher pipeline")]
 struct Arguments {
@@ -25,6 +27,12 @@ struct Arguments {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Discover MOHAA installations from the live Windows registry.
+    Discover {
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
     /// Identify an install and index its maps.
     Scan {
         /// MOHAA installation root (the directory containing `main`).
@@ -73,7 +81,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
-    /// Preflight one server, resolve needed content, and emit (but do not run) its launch command.
+    /// Preflight one server, resolve needed content, and optionally launch the client.
     Join {
         /// Authoritative server game address, such as 173.249.214.104:12203.
         server: SocketAddrV4,
@@ -85,9 +93,15 @@ enum Command {
         /// Override the server-published mod directory. Empty selects the profile's base game.
         #[arg(long)]
         fs_game: Option<String>,
-        /// Client program to place in the command description. It is not opened or executed.
+        /// Client executable to describe or launch.
         #[arg(long, default_value = "openmohaa")]
         client: String,
+        /// Select `OpenMoHAA`'s single-executable dialect or retail's per-product dialect.
+        #[arg(long, value_enum, default_value_t = ClientFlavor::OpenMohaa)]
+        client_kind: ClientFlavor,
+        /// Start the client after emitting the preflight result.
+        #[arg(long)]
+        execute: bool,
         /// Per-server status-query deadline in milliseconds.
         #[arg(long, default_value_t = 2_500)]
         timeout_ms: u64,
@@ -123,6 +137,22 @@ enum Format {
     #[default]
     Text,
     Json,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum ClientFlavor {
+    #[default]
+    OpenMohaa,
+    Retail,
+}
+
+impl From<ClientFlavor> for windows::ClientKind {
+    fn from(value: ClientFlavor) -> Self {
+        match value {
+            ClientFlavor::OpenMohaa => Self::OpenMohaa,
+            ClientFlavor::Retail => Self::Retail,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -183,6 +213,8 @@ struct JoinOutput<'a> {
     preflight: &'a Option<reveille_core::preflight::Report>,
     pakradar: &'a Option<PakRadarOutput>,
     launch: &'a LaunchCommand,
+    used_home_fallback: bool,
+    launched_process_id: Option<u32>,
 }
 
 struct JoinRequest<'a> {
@@ -191,6 +223,8 @@ struct JoinRequest<'a> {
     fallback_target: TargetGame,
     fs_game_override: Option<String>,
     client: String,
+    client_kind: windows::ClientKind,
+    execute: bool,
     server_timeout: Duration,
     catalogue_timeout: Duration,
     format: Format,
@@ -211,6 +245,7 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn Error>> {
     match Arguments::parse().command {
+        Command::Discover { format } => discover_windows(format),
         Command::Scan { path, format } => scan(&path, format),
         Command::Browse {
             game,
@@ -256,6 +291,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
             game,
             fs_game,
             client,
+            client_kind,
+            execute,
             timeout_ms,
             catalogue_timeout_ms,
             format,
@@ -266,6 +303,8 @@ async fn run() -> Result<(), Box<dyn Error>> {
                 fallback_target: game.into(),
                 fs_game_override: fs_game,
                 client,
+                client_kind: client_kind.into(),
+                execute,
                 server_timeout: Duration::from_millis(timeout_ms),
                 catalogue_timeout: Duration::from_millis(catalogue_timeout_ms),
                 format,
@@ -275,6 +314,50 @@ async fn run() -> Result<(), Box<dyn Error>> {
     }
 }
 
+#[cfg(windows)]
+fn discover_windows(format: Format) -> Result<(), Box<dyn Error>> {
+    use reveille_core::platform::registry;
+
+    let keys = registry::read_live_hives()?;
+    let ea_roots = registry::discover_ea_install_roots(&keys);
+    let ea = registry::identify_ea_installations(&ea_roots);
+    let gog_root = registry::discover_gog_install_root(&keys);
+    match format {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ea": ea,
+                "gog_root": gog_root,
+            }))?
+        ),
+        Format::Text => {
+            for installation in ea.installations {
+                println!(
+                    "EA install: {} ({:?})",
+                    installation.installation.root.display(),
+                    installation.installation.identification
+                );
+            }
+            for skipped in ea.skipped {
+                println!(
+                    "EA non-result: {} — {}",
+                    skipped.discovery.root.display(),
+                    skipped.reason
+                );
+            }
+            if let Some(root) = gog_root {
+                println!("GOG install root: {}", root.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn discover_windows(_format: Format) -> Result<(), Box<dyn Error>> {
+    Err("live registry discovery is available only on Windows".into())
+}
+
 async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
     let JoinRequest {
         server,
@@ -282,6 +365,8 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
         fallback_target,
         fs_game_override,
         client,
+        client_kind,
+        execute,
         server_timeout,
         catalogue_timeout,
         format,
@@ -293,7 +378,9 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
         .and_then(|value| TargetGame::from_game_name(value))
         .unwrap_or(fallback_target);
     let profile = LaunchProfile::new(target);
-    let game_directory = install_root.join(profile.data_directory());
+    let install_target =
+        windows::resolve_install_target(install_root, profile.data_directory(), client_kind)?;
+    let game_directory = install_target.game_directory;
     let index = MapIndex::scan(&game_directory)?;
     let rotation = status
         .get("sv_maplist")
@@ -331,6 +418,10 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
         fs_game_value
     };
     let launch = LaunchCommand::new(client, profile, FsGame::new(fs_game_value)?, server)?;
+    let launched_process_id = execute
+        .then(|| windows::launch_client(&launch, client_kind))
+        .transpose()?
+        .map(|child| child.id());
 
     match format {
         Format::Json => println!(
@@ -342,15 +433,28 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
                 preflight: &preflight,
                 pakradar: &pakradar,
                 launch: &launch,
+                used_home_fallback: install_target.used_home_fallback,
+                launched_process_id,
             })?
         ),
-        Format::Text => render_join(
-            server,
-            &compatibility,
-            pakradar.as_ref(),
-            catalogue.as_ref(),
-            &launch,
-        ),
+        Format::Text => {
+            if install_target.used_home_fallback {
+                println!(
+                    "Install directory is not writable; OpenMoHAA content target: {}",
+                    game_directory.display()
+                );
+            }
+            render_join(
+                server,
+                &compatibility,
+                pakradar.as_ref(),
+                catalogue.as_ref(),
+                &launch,
+            );
+            if let Some(process_id) = launched_process_id {
+                println!("Launched client process {process_id}");
+            }
+        }
     }
     Ok(())
 }

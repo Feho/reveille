@@ -2,8 +2,8 @@
 
 //! Platform-neutral pieces of Windows installation discovery and `OpenMoHAA` maintenance.
 //!
-//! Registry enumeration, process inspection, client launch, and log tailing intentionally remain
-//! in the later Windows-only layer.
+//! Live registry enumeration is compiled only on Windows. Process inspection, client launch, and
+//! install-target policy belong to callers; client log tailing is explicitly outside v1.
 
 pub mod gog;
 pub mod openmohaa;

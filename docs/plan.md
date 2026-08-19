@@ -380,9 +380,37 @@ clippy and fmt clean.
   1.11/1.12 predates the home-path split and has no home path at all, so the game directory is
   its only install target. Test retail launch first on the Windows machine.
 
+### Retail launch measurement (Windows, 19 Aug 2026)
+
+Tested the real retail-disc AA client at `D:\Jeux\EA GAMES\MOHDA\MOHAA.exe` (file version
+`1.2.4.190`, SHA-256 `ed028e97cb56ea3a89a821635b07e0ed87bcbab751b6e13e88edc9c02dfc88cc`)
+against a local dedicated server. The existing AA `LaunchCommand` argument vector
+(`+set com_target_game 0 +set fs_game "" +connect 127.0.0.1:12233`) launched the client and the
+client visibly attempted the connection. Thus retail accepts `+connect host:port`, including
+when it is passed with the command shape constructed in milestone 4.
+
+The profile-selection assumption was only half right. Binary inspection finds `fs_game` in the
+retail AA and Spearhead executables, and the empty AA value did not prevent the connection
+attempt: it is the retail mod-directory selector as expected. `com_target_game` is absent from
+both retail binaries, however; it is an OpenMoHAA cvar (`common.c:3229-3235`) and cannot select a
+retail product. Retail uses separate executables (`MOHAA.exe`, `moh_spearhead.exe`, and
+`moh_breakthrough.exe`). The Windows launch layer must therefore select the retail executable
+from the requested profile and must not rely on `com_target_game`; OpenMoHAA continues to use
+one executable plus `com_target_game`. This is a launch-dialect difference, not an install-target
+change: retail still has no home path, so `<install>\main` remains its only AA content target.
+
 **Part B — Windows only.** Registry *enumeration*, seeding the hash→version corpus from real GOG,
 EA App and retail-disc installs, launching the Windows client, and the untested retail 1.11/1.12 launch
 assumption.
+
+**Part B status (19 Aug 2026): implemented, corpus completion blocked on installations.** Live
+32- and 64-bit `Uninstall`/Origin enumeration and the engine's 32-bit GOG key are implemented and
+exercised against this Windows machine's real hives. The hives contain no EA App or GOG MOHAA
+install (both correctly report no result). Retail/OpenMoHAA launch dialects, process launch, and
+the probed install-target policy are implemented. The real French retail-disc AA 1.11, Spearhead
+2.15, and Breakthrough 2.40 binaries on this machine seed the corpus and identify through
+`KnownBinaryHashes`. No GOG or EA App binary was available to measure, so those hashes have not
+been invented and Part B cannot honestly be marked complete until real installs are supplied.
 
 Report Part A complete on its own rather than holding the milestone open for the move.
 

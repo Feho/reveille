@@ -231,6 +231,16 @@ pub struct LaunchCommand {
     pub arguments: Vec<String>,
 }
 
+/// Engine command-line dialect selected by the platform layer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchDialect {
+    /// One `OpenMoHAA` executable selects AA/SH/BT through `com_target_game`.
+    OpenMohaa,
+    /// Retail selects AA/SH/BT by executable and does not define `com_target_game`.
+    Retail,
+}
+
 impl LaunchCommand {
     /// Build OpenMoHAA-compatible arguments without starting a process.
     ///
@@ -264,6 +274,16 @@ impl LaunchCommand {
             server,
             arguments,
         })
+    }
+
+    /// Return the argument vector understood by the selected engine.
+    #[must_use]
+    pub fn arguments_for(&self, dialect: LaunchDialect) -> &[String] {
+        match dialect {
+            LaunchDialect::OpenMohaa => &self.arguments,
+            // Retail binaries contain `fs_game` but not OpenMoHAA's `com_target_game` cvar.
+            LaunchDialect::Retail => &self.arguments[3..],
+        }
     }
 }
 
@@ -304,6 +324,8 @@ pub struct RejectionExplanation {
 }
 
 /// Translate a post-connect server rejection. This is deliberately not an input to [`classify`].
+///
+/// v1 has no caller because it does not tail client logs; this remains tested v2 groundwork.
 #[must_use]
 pub fn explain_rejection(raw: &str) -> Option<RejectionExplanation> {
     let text = raw.trim_matches(['\0', '\r', '\n']);
@@ -422,7 +444,9 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
     use super::{CompatibilityState, classify_server};
-    use super::{FsGame, LaunchCommand, LaunchProfile, RejectionKind, explain_rejection};
+    use super::{
+        FsGame, LaunchCommand, LaunchDialect, LaunchProfile, RejectionKind, explain_rejection,
+    };
     use crate::discovery::{
         GamePort, MasterEndpoint, QueryPort, ReportedOccupancy, Server, TargetGame,
     };
@@ -451,6 +475,22 @@ mod tests {
                 "+connect",
                 "203.0.113.7:23900",
             ]
+        );
+    }
+
+    #[test]
+    fn retail_dialect_omits_openmohaa_profile_cvar() {
+        let command = LaunchCommand::new(
+            "MOHAA.exe",
+            LaunchProfile::new(TargetGame::AlliedAssault),
+            FsGame::new("").expect("base game"),
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 12_203),
+        )
+        .expect("launch command");
+
+        assert_eq!(
+            command.arguments_for(LaunchDialect::Retail),
+            ["+set", "fs_game", "", "+connect", "127.0.0.1:12203"]
         );
     }
 
