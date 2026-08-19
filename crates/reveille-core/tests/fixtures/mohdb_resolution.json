@@ -1,0 +1,64 @@
+{
+  "captured_at": "2026-08-19",
+  "catalogue_size": 2528,
+  "cases": [
+    {
+      "wanted": "obj/obj_fallenvillage",
+      "hits": 1,
+      "outcome": "exact",
+      "catalogue_map": "obj/obj_fallenvillage",
+      "filename": "User-obj_FallenVillage.pk3",
+      "size_mb": 2.4
+    },
+    {
+      "wanted": "obj/obj_howitzer",
+      "hits": 1,
+      "outcome": "exact",
+      "catalogue_map": "obj/obj_howitzer ",
+      "filename": "obj_howitzer_v1_1.pk3",
+      "size_mb": 1.5
+    },
+    {
+      "wanted": "obj/thechurch_final_obj",
+      "hits": 2,
+      "outcome": "exact",
+      "catalogue_map": "obj/thechurch_final_obj",
+      "filename": "Obj_TheChurch_Final.pk3",
+      "size_mb": 3.0
+    },
+    {
+      "wanted": "obj/obj_dessau1945fix",
+      "hits": 2,
+      "outcome": "exact",
+      "catalogue_map": "obj/obj_dessau1945fix",
+      "filename": "obj_dessau1945fix.pk3",
+      "size_mb": 2.1
+    },
+    {
+      "wanted": "obj/questufou_s_yvette_obj",
+      "hits": 1,
+      "outcome": "choice_required",
+      "catalogue_map": "dm/Questufou_s_Yvette",
+      "filename": "Questufou_S_Yvette_Final.pk3",
+      "size_mb": 4.9
+    },
+    {
+      "wanted": "obj/obj_rush_party",
+      "hits": 1,
+      "outcome": "choice_required",
+      "catalogue_map": "dm/rush_party",
+      "filename": "rush_party.pk3",
+      "size_mb": 9.8
+    },
+    {
+      "wanted": "obj/obj_morning2",
+      "hits": 0,
+      "outcome": "no_source",
+      "catalogue_map": null,
+      "filename": null,
+      "size_mb": null
+    }
+  ],
+  "exact_total_mb": 9.0,
+  "with_choices_total_mb": 23.7
+}

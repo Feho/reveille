@@ -1,0 +1,17 @@
+{
+  "captured_at": "2026-08-19",
+  "address": "173.249.214.104:12203",
+  "protocol": "8",
+  "sv_hostname": "<[TFC]> Sniper Only OBJ | www.tfc-clan.com",
+  "sv_info": "MoH:AA 1.12 Reborn Patch RC3.5 (NIX)",
+  "version": "Medal of Honor Allied Assault 1.11 linux-i386 Jul 22 2004",
+  "mapname": "obj/blutstein",
+  "g_gametypestring": "Objective-Match",
+  "sv_allowDownload": "0",
+  "sv_maxclients": "32",
+  "sv_privateClients": "4",
+  "g_allowjointime": "10",
+  "sv_minPing": "0",
+  "sv_maxPing": "0",
+  "sv_maplist": "dm/mohdm2 obj/stlo dm/mohdm3 obj/obj_fallenvillage obj/blutstein dm/mohdm7 obj/questufou_s_yvette_obj obj/obj_morning2 obj/obj_dessau1945fix obj/obj_rush_party dm/mohdm6 obj/obj_howitzer obj/thechurch_final_obj obj/renan"
+}

@@ -1,0 +1,17 @@
+{
+  "note": "Dedicated server, not a client. Corrected engine-scope scan only indexes top-level main packages; the legacy recursive spike's 54 duplicates came from three .claude/worktrees copies.",
+  "pk3_count": 30,
+  "expansions": ["main"],
+  "maps_indexed": 88,
+  "maps_multi_provider": 0,
+  "legacy_recursive_spike_multi_provider": 54,
+  "keys_without_slash": 37,
+  "loose_bsp_files": 0,
+  "pk3dir_count": 0,
+  "known_checksums": {
+    "dm/mohdm6": 1974169620,
+    "dm/mohdm7": 391868696
+  },
+  "checksum_source_pak": "Pak5.pk3",
+  "awkward_filenames": ["z_Kmarzo-St Renan.pk3"]
+}

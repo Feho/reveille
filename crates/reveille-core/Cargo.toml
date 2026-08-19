@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+[package]
+name = "reveille-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
