@@ -358,6 +358,12 @@ impl LaunchCommand {
     }
 
     /// Return the argument vector understood by the selected engine.
+    ///
+    /// Both dialects set two quality-of-life cvars before connecting: `ui_console 1` keeps the
+    /// console reachable so a player can read the engine's own account of a failed connection,
+    /// and `cl_playintro 0` skips the intro movies that otherwise sit between the launch and the
+    /// server. `+connect` stays last in every vector because it initiates the connection, and
+    /// anything after it would be set on a client that is already leaving the menu.
     #[must_use]
     pub fn arguments_for(&self, dialect: LaunchDialect) -> Vec<String> {
         match dialect {
@@ -368,6 +374,12 @@ impl LaunchCommand {
                 "+set".to_owned(),
                 "fs_game".to_owned(),
                 self.fs_game.as_str().to_owned(),
+                "+set".to_owned(),
+                "ui_console".to_owned(),
+                "1".to_owned(),
+                "+set".to_owned(),
+                "cl_playintro".to_owned(),
+                "0".to_owned(),
                 "+connect".to_owned(),
                 self.server.to_string(),
             ],
@@ -377,6 +389,12 @@ impl LaunchCommand {
                 "+set".to_owned(),
                 "fs_game".to_owned(),
                 self.fs_game.as_str().to_owned(),
+                "+set".to_owned(),
+                "ui_console".to_owned(),
+                "1".to_owned(),
+                "+set".to_owned(),
+                "cl_playintro".to_owned(),
+                "0".to_owned(),
                 "+connect".to_owned(),
                 self.server.to_string(),
             ],
@@ -573,6 +591,12 @@ mod tests {
                 "+set",
                 "fs_game",
                 "reborn",
+                "+set",
+                "ui_console",
+                "1",
+                "+set",
+                "cl_playintro",
+                "0",
                 "+connect",
                 "203.0.113.7:23900",
             ]
@@ -591,7 +615,19 @@ mod tests {
 
         assert_eq!(
             command.arguments_for(LaunchDialect::Retail),
-            ["+set", "fs_game", "", "+connect", "127.0.0.1:12203"]
+            [
+                "+set",
+                "fs_game",
+                "",
+                "+set",
+                "ui_console",
+                "1",
+                "+set",
+                "cl_playintro",
+                "0",
+                "+connect",
+                "127.0.0.1:12203"
+            ]
         );
     }
 

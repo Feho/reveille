@@ -726,6 +726,14 @@ were built once and read `state.sort` at construction, so both froze on whatever
 at boot. They are now written in place on every render, the same rule the toolbar already follows
 and for the same reason.
 
+**Fourth review, one request: the launch line.** The owner asked that the game start with
+`+set ui_console 1 +set cl_playintro 0`. Both cvars now sit in `arguments_for` for both dialects,
+between `fs_game` and `+connect`. `ui_console 1` keeps the console reachable, which matters here
+because the engine's own message is the only account of a connection Reveille cannot see fail —
+everything the launcher checks happens before the process starts. `cl_playintro 0` removes the
+intro movies from between the click and the server. `+connect` stays last: it initiates the
+connection, so nothing may follow it. The CLI's `render_launch_command` fixtures moved with it.
+
 ---
 
 ## Verification overall

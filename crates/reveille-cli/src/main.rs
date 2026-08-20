@@ -1181,7 +1181,7 @@ mod tests {
 
         assert_eq!(
             render_launch_command(&command),
-            "'/opt/Open MOHAA/openmohaa' +set com_target_game 0 +set fs_game '' +connect 203.0.113.9:12203"
+            "'/opt/Open MOHAA/openmohaa' +set com_target_game 0 +set fs_game '' +set ui_console 1 +set cl_playintro 0 +connect 203.0.113.9:12203"
         );
     }
 
@@ -1198,7 +1198,7 @@ mod tests {
 
         assert_eq!(
             render_command_parts(&command.program, &arguments),
-            r"'C:\Games\MOHAA\MOHAA.exe' +set fs_game '' +connect 203.0.113.9:12203"
+            r"'C:\Games\MOHAA\MOHAA.exe' +set fs_game '' +set ui_console 1 +set cl_playintro 0 +connect 203.0.113.9:12203"
         );
     }
 
