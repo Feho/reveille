@@ -1,5 +1,3 @@
-<!-- SPDX-License-Identifier: GPL-2.0-only -->
-
 # Reveille repository conventions
 
 - Use default `cargo fmt` formatting. `cargo clippy --workspace --all-targets -- -D warnings`
