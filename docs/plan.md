@@ -745,6 +745,32 @@ and its three distinct resolution outcomes, and the 19 Aug population snapshot.
 and `windows-latest` from commit 1; from `d4812eb` the ubuntu leg covers the portable crates and
 the Windows leg covers the whole workspace, for the reasons in the M6 review.
 
+## Scope decided after v1 was drafted
+
+**Browsable mod and map management is v2, decided 22 Aug 2026 by the project owner.** The goal
+stated for it: managing maps and mods should feel like installing extensions in VS Code — browse,
+install, enable, disable, update, remove.
+
+Recorded here because it is a *new product surface*, not a refinement of what M3 already does.
+The v1 pipeline resolves content **reactively**: one server, at join time, for the maps that
+server's rotation needs. A catalogue is the opposite shape — the player browses before they have
+a server in mind, and the tool must then track what is installed, what it came from, and what
+state it is in. Three consequences worth having written down before the work starts:
+
+- It needs **mod-level metadata** — a name, a version, a description, a dependency on a game
+  target — and moh-db is a *map* catalogue. Whether that metadata exists anywhere is the first
+  thing to check, not an implementation detail to discover later.
+- It needs **installed-state tracking**. v1 deliberately has none: `install_archive` preserves the
+  filename and `mapindex` re-derives what is present by walking the disk. Enable/disable/update
+  cannot be answered by a disk walk alone.
+- Enable/disable touches the engine's search path, where the v1 facts were measured for
+  *installation*, not for *toggling*. `fs_searchpaths` precedence (`files.cpp:3245-3257`) will
+  need re-reading with that question in mind.
+
+None of this blocks v1. It is written down so that v1 does not accidentally foreclose it — in
+particular, do not let the reactive path bake in an assumption that content only ever arrives
+because a server asked for it.
+
 ## Decisions still open
 
 Maintainer model. The moh-db relationship: worth telling them, and worth asking for published

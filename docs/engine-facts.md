@@ -242,20 +242,25 @@ exercises exact-match, ambiguity, and dead-end — build the resolver's tests on
 
 ## 5. Prohibitions
 
-- **Never send a `connect` packet across a server list.** `getchallenge` is safe and answers
+The rule statements now live in [`docs/rules.md`](rules.md), with an identifier each and the
+place in the code where every one is enforced. Change a rule there first. What follows is the
+*engine evidence* for the rules that come from this document — the reason each holds, which is
+the part that belongs here.
+
+- (S1) **Never send a `connect` packet across a server list.** `getchallenge` is safe and answers
   freely, but it proves only that the server is awake — `SV_GetChallenge` (`sv_client.c:35-110`)
   issues a token *before* bans, capacity, protocol and ping are tested in `SV_DirectConnect`
   (`sv_client.c:389-640`). Actually predicting a rejection needs a real Huffman-compressed
   `connect`, which on success creates a live `CS_CONNECTED` client on someone else's server.
   That is a join, not a probe. Preflight uses `getstatus` only.
-- **Never label a client count "players" or "humans."** `numplayers` is `SV_NumClients()` —
+- (H1) **Never label a client count "players" or "humans."** `numplayers` is `SV_NumClients()` —
   every non-free slot, with no way to distinguish a person from a bot or a parked connection.
   The type should be named to make the mistake hard.
-- **Never report a moh-db download as verified.** No hash is published; the digest is *recorded*.
-- **Never emit a boolean "can I join".** The states are `Compatible` / `NeedsMaps(n)` /
+- (H4) **Never report a moh-db download as verified.** No hash is published; the digest is *recorded*.
+- (H3) **Never emit a boolean "can I join".** The states are `Compatible` / `NeedsMaps(n)` /
   `NoSource` / `CantTell`, and `Compatible` means *nothing checkable is wrong*.
-- **Never redistribute EA assets.** Detection and linking to a store only.
-- Reject downloaded archives containing `.exe` or `.dll`. A map pack is data.
+- (L1) **Never redistribute EA assets.** Detection and linking to a store only.
+- (C1) Reject downloaded archives containing `.exe` or `.dll`. A map pack is data.
 
 ---
 

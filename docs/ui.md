@@ -99,7 +99,11 @@ There is **one** primary surface. The three-screen wizard was removed.
 
 - **Setup** (`views/setup.js`) — shown *only* while no install is resolved. Not a welcome page: it
   answers "where is the game" and says how confidently, distinguishing a verified binary hash from
-  a name-only match. Reachable again by clicking the install chip in the titlebar.
+  a name-only match. It also checks the host's latest stable OpenMoHAA archive and offers an
+  install or explicit replacement beside the user's retail assets. Reachable again by clicking the
+  install chip in the titlebar; the chip's tooltip names both the game folder and OpenMoHAA. An
+  existing engine is detected by client-binary presence, but its release version is not inferred;
+  the replacement copy says so before naming the stable build it will write.
 - **Servers** (`views/servers.js`) — where the session lives.
 - **Detail pane** (`views/join.js`) — selection previews the join *in place*. No
   browser → join → back navigation; servers stay comparable; the list never disappears.
@@ -107,19 +111,24 @@ There is **one** primary surface. The three-screen wizard was removed.
 
 ## 4. Honesty rules, as UI rules
 
-These are product contracts from `AGENTS.md` and `docs/engine-facts.md` §5, not style preferences.
-Breaking one is a bug.
+These are product contracts, not style preferences. Breaking one is a bug.
+
+The rules themselves live in [`docs/rules.md`](rules.md) with an identifier each; this table
+records what *the interface* does to satisfy them, which is the part specific to this document.
+Change a rule in the register first, then update the right-hand column here.
 
 | Rule | How the interface satisfies it |
 |---|---|
-| Never call a client count "players" or "humans" | The column is **Clients**. Its tooltip says "Occupied slots reported by every server. Not verified as people." |
-| Bots are disjoint from clients | Rendered on their own line as `+8 bots`, never summed into the client figure. The status bar says "counted separately". |
-| Never imply free slots | Capacity appears only as a denominator (`21/32`). `capacity - clients` is never computed. |
-| Never emit a boolean "can I join" | Four states, never a tick. `Compatible` is explained as "that is all Reveille can check — the server still decides whether you get in." |
-| Never report a moh-db download as verified | Candidate rows show `tested` (the catalogue's own flag) and never "verified". Where a server publishes no checksum, the detail pane says an exact-file match cannot be confirmed. |
-| Never auto-apply an ambiguous match | Choice radios start with **nothing selected**. The total excludes unresolved maps and the pane says how many still need a choice. |
-| Say where files went | `used_home_fallback` prints the real `%APPDATA%\moh\main` path, not a euphemism. |
-| A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
+| **H1** · Never call a client count "players" or "humans" | The column is **Clients**. Its tooltip says "Occupied slots reported by every server. Not verified as people." |
+| **H2** · Bots are disjoint from clients | Rendered on their own line as `+8 bots`, never summed into the client figure. The status bar says "counted separately". |
+| **H7** · Never imply free slots | Capacity appears only as a denominator (`21/32`). `capacity - clients` is never computed. |
+| **H3** · Never emit a boolean "can I join" | Four states, never a tick. `Compatible` is explained as "that is all Reveille can check — the server still decides whether you get in." |
+| **H4** · Never report a moh-db download as verified | Candidate rows show `tested` (the catalogue's own flag) and never "verified". Where a server publishes no checksum, the detail pane says an exact-file match cannot be confirmed. |
+| **H5** · Never imply the release digest proves publisher authenticity | Visible setup copy promises only that Reveille checks whether the download arrived intact; it never calls the file safe or the publisher verified. The release page's exact file check is optional tooltip detail, not newcomer-facing copy. |
+| **H6** · Never state a cause that was not observed | Engine failures are classified in Rust (`OpenMohaaFailureKind`), never by matching message text in the shell. A release that publishes no file check was never downloaded and says so; only a size or digest mismatch may say the download did not arrive intact. An unclassified failure shows its own text rather than borrowing a cause. The original message stays as tooltip detail. |
+| **C3** · Never auto-apply an ambiguous match | Choice radios start with **nothing selected**. The total excludes unresolved maps and the pane says how many still need a choice. |
+| **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\moh\main` path, not a euphemism. |
+| **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
 
 ## 5. The join gate
 
@@ -224,8 +233,14 @@ platform v1 supports.
 - All motion respects `prefers-reduced-motion`.
 - Progress is determinate wherever a total is known (`78/190`, byte counts) and indeterminate only
   during the master handshake, where nothing is known yet.
-- Every long operation is cancellable: the sweep has a **Stop**, and selecting another server
-  abandons the in-flight catalogue lookup.
+- Every long operation is cancellable: the sweep has a **Stop**, selecting another server
+  abandons the in-flight catalogue lookup, and the OpenMoHAA download has **Stop download**. Engine
+  cancellation is checked between response chunks and never interrupts the atomic apply phase.
+- Whether the client is running is probed **after** the archive has downloaded, not before. The
+  transfer is long enough for a player to start the game inside it, and a stale reading turns an
+  honest "Close OpenMoHAA and try again" into a locked-file error part-way through the apply. The
+  probe covers every executable a release archive replaces, not only `openmohaa.exe` — a running
+  dedicated server holds the same files.
 
 ### Re-rendering must not steal the caret
 
@@ -281,6 +296,9 @@ The rule: **an explanation earns a paragraph only if it changes the next click.*
 - A ready server says nothing. Silence is the correct rendering of "nothing to do".
 - Prefer the shorter true sentence. "Publishes no map checksum, so only names are matched, not
   files" beats the same fact in three clauses.
+- Translate implementation terms into the decision they support. Newcomer-facing copy says
+  "checks that the download arrived intact", not `SHA-256`, digest, GitHub API, asset, or archive.
+  Exact filenames and published digests may remain optional tooltip detail for diagnosis.
 
 - Say "clients", never "players".
 - Say "did not answer", not "offline" — we know the former, not the latter.

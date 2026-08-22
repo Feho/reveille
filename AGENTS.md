@@ -21,6 +21,12 @@ required, and none survives a machine change.
 - [`docs/plan.md`](docs/plan.md) — the v1 plan, milestone by milestone, with a **Status** note on
   each. It records what was measured, what was corrected and why, and the deliberate asymmetries
   that must not be "tidied up" later.
+- [`docs/rules.md`](docs/rules.md) — the behavioural contracts, one identifier each, with the place
+  in the code where every rule is enforced and the test that guards it. **The register: change a
+  rule here first.** Its "Known gaps" section lists the rules that have no mechanical guard.
+- [`docs/friction.md`](docs/friction.md) — what stops a player, ranked by evidence rather than
+  instinct. Every entry says how it is known: Measured, Observed or Assumed. An issue should trace
+  back to an entry here.
 - [`docs/engine-facts.md`](docs/engine-facts.md) — protocol constants, the exact map-name
   normalisation, search-path precedence, frozen fixtures, and prohibitions. Every constant cites
   the openmohaa source line it came from.

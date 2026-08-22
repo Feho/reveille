@@ -48,8 +48,9 @@ Prefer `git diff` when reviewing a change; sweep the whole tree when asked for a
 
 ### 1. Honesty
 
-`docs/ui.md` holds a table of honesty rules under "Breaking one is a bug". **Read that table
-every time** — it is authoritative and it grows. Do not work from a copy of it in this file.
+The rules live in `docs/rules.md`, section **H — Honesty**, one identifier each. `docs/ui.md` §4
+records what the interface does to satisfy them. **Read both every time** — they grow, and a copy
+in this file would go stale. Cite the identifier (`H4`, `H6`) in every honesty finding.
 
 The general form of the rules: never claim something the program did not observe. Concretely,
 that means catching a string that
@@ -97,8 +98,8 @@ differently, report it; a beginner reads them as two concepts.
   wrong, report the copy and say plainly that the decision may be the real subject.
 - Never rewrite a string to be friendlier at the cost of precision. If the honest sentence is
   long, say so and offer the shortest sentence that stays true.
-- Never invent a rule. Every honesty finding cites a row of the `docs/ui.md` table; every
-  jargon finding names the offending word.
+- Never invent a rule. Every honesty finding cites a `docs/rules.md` identifier; every jargon
+  finding names the offending word.
 
 ## Reporting
 
@@ -112,7 +113,7 @@ For each finding:
 <file>:<line>  [false | stranded | jargon | inconsistent]
 Says:      the exact string
 Problem:   one sentence
-Basis:     the ui.md rule row, or the specific word
+Basis:     the rules.md identifier (H1, C3, ...), or the specific word
 Suggest:   a replacement that is no less true, or "needs a decision" and why
 ```
 
