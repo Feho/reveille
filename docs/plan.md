@@ -771,6 +771,12 @@ unexpected ZIP entries, missing executables, process parsing, choice persistence
 no-clobber reinstall, switching both directions, and process gates. Live installation is restricted
 to a scratch game root; a real player installation is never an acceptance-test target.
 
+**Portable CI correction (23 Aug 2026).** The first Reborn run and the following Ping-column run
+both passed the Windows workspace job but failed the ubuntu portable job under `clippy -D warnings`.
+Windows-only `tasklist` imports and parser helpers in `reveille-platform` were compiled but unused
+in a normal non-Windows library build. Their `cfg` guards now match the existing Windows/test-only
+parser boundary; the public conservative non-Windows activity result remains available.
+
 ---
 
 ## Verification overall

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 
 use reveille_core::engine::EngineChoice;

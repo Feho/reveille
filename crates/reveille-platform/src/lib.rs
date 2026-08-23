@@ -16,7 +16,9 @@ use std::process::Command;
 use reveille_core::discovery::TargetGame;
 use reveille_core::engine::EngineChoice;
 use reveille_core::join::{LaunchCommand, LaunchDialect};
-use reveille_core::platform::openmohaa::{self, ClientActivity};
+#[cfg(any(windows, test))]
+use reveille_core::platform::openmohaa;
+use reveille_core::platform::openmohaa::ClientActivity;
 use thiserror::Error;
 
 /// One kind of `OpenMoHAA` program whose files a release replaces.
@@ -65,6 +67,7 @@ impl OpenMohaaActivity {
         }
     }
 
+    #[cfg(any(windows, test))]
     const fn checked() -> Self {
         Self {
             checked: true,
@@ -72,6 +75,7 @@ impl OpenMohaaActivity {
         }
     }
 
+    #[cfg(any(windows, test))]
     fn observe(&mut self, program: OpenMohaaProgram) {
         if !self.running.contains(&program) {
             self.running.push(program);
