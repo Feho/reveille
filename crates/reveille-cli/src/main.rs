@@ -1016,9 +1016,10 @@ async fn browse_servers(
                         .map(|classified| render_compatibility_state(&classified.assessment.state))
                 });
                 println!(
-                    "  {}:{}  {occupancy}  protocol={}  maps={}{}  {}",
+                    "  {}:{}  {occupancy}  {}ms round trip  protocol={}  maps={}{}  {}",
                     server.endpoint.address,
                     server.game_port,
+                    server.status_round_trip,
                     server.protocol.as_deref().unwrap_or("?"),
                     server.rotation.len(),
                     compatibility_state

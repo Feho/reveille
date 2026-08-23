@@ -72,6 +72,16 @@ numeric_newtype!(
     PingMillis(u32);
 );
 numeric_newtype!(
+    /// Measured round trip of this sweep's `getstatus` request, in milliseconds.
+    ///
+    /// This is a single UDP request to the authoritative game port and back, timed from just
+    /// before the send to just after the reply arrives. It is **not** the in-game ping, which the
+    /// engine averages over a live connection, and it is not [`PingMillis`], which is the
+    /// server's own admission gate. One sample from a sweep of sixteen concurrent probes is
+    /// noisier than either.
+    RoundTripMillis(u32);
+);
+numeric_newtype!(
     /// Join window after a round starts, in seconds.
     JoinWindowSeconds(u32);
 );
@@ -233,6 +243,9 @@ pub struct Server {
     pub client_capacity: Option<ClientCapacity>,
     /// Raw `pure` value, when exposed.
     pub pure: Option<String>,
+    /// Round trip measured on this sweep's `getstatus` request. Every listed server answered one,
+    /// so this is always a real measurement rather than an estimate.
+    pub status_round_trip: RoundTripMillis,
 }
 
 /// Stage at which one master registration became a recorded non-result.

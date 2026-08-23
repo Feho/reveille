@@ -169,12 +169,12 @@ Le dossier accepté est mémorisé ; au lancement suivant, cet écran est **saut
 ├────────────────────────────────────────────────────────────────────────────────────┤
 │ ⌕ Search server names  ☐ Has people  ☐ Hide unavailable maps   ▓▓▓▓▓░░ 78/190 [Stop]│
 ├──────────────────────────────────────────────┬─────────────────────────────────────┤
-│ SERVER          CLIENTS   MAP NOW   RUNS  NEEDS│  SERVER                            │
-│ harzCore          40/64  dm/mohdm6  1.11       │  <[TFC]> Objective                 │
+│ SERVER          CLIENTS   MAP NOW  PING  RUNS  NEEDS│ SERVER                        │
+│ harzCore          40/64  dm/mohdm6  41 ms 1.11 │  <[TFC]> Objective                 │
 │  62.75.x.x:12203  +8 bots                      │  173.249.214.104:12203             │
-│ <[TFC]> Objective  1/32  obj/bluts  1.11  + 7 maps                                  │
-│ [FORTE] Public    21/32  dm/mohdm6  1.11  not published │ Engine    MOHAA 1.11 …    │
-│ =MB= Revival Mie   0/20  dm_stanalie 1.12 + 1 map      │ Now       obj/bluts        │
+│ <[TFC]> Objective  1/32  obj/bluts  84 ms 1.11  + 7 maps                            │
+│ [FORTE] Public    21/32  dm/mohdm6 137 ms 1.11  not published │ Engine  MOHAA 1.11 … │
+│ =MB= Revival Mie   0/20  dm_stanalie 29 ms 1.12 + 1 map    │ Now       obj/bluts    │
 │ …                                              │  Rotation  14 maps                 │
 │                                                │                                    │
 │                                                │  JOIN CHECK                        │
@@ -220,7 +220,7 @@ Les deux bascules et le tri sont **persistés** entre les sessions.
 
 ### B.3 Le tableau des serveurs
 
-Cinq colonnes. Tri par clic sur l'en-tête, flèche ▲/▼ sur la colonne active. Tri par défaut :
+Six colonnes. Tri par clic sur l'en-tête, flèche ▲/▼ sur la colonne active. Tri par défaut :
 **clients décroissants**.
 
 | Colonne | Contenu | Triable |
@@ -228,6 +228,7 @@ Cinq colonnes. Tri par clic sur l'en-tête, flèche ▲/▼ sur la colonne activ
 | **Server** | Nom d'hôte, et en dessous l'adresse `ip:port` en petit | oui |
 | **Clients** | `21/32` — occupés / capacité. Sur une seconde ligne, `+8 bots` si le serveur en déclare. `—` si le serveur ne publie rien (jamais `0`) | oui |
 | **Map now** | La carte en cours, telle que le serveur l'orthographie (`obj/obj_team2`) | oui |
+| **Ping** | `84 ms` — l'aller-retour **mesuré** de la requête `getstatus` de ce balayage. Un seul échantillon UDP, pris pendant que quinze autres sondes étaient en vol. Ce n'est **ni** le ping en jeu, **ni** `sv_minPing`/`sv_maxPing` (la barrière d'admission du serveur). Infobulle : « Time for one status request to this server and back, measured once during this check. Not the in-game ping. » Ni couleur, ni barres, ni bandes : une mesure, pas un verdict | oui (croissant d'abord) |
 | **Runs** | Version courte du moteur (`1.11`, `1.12+0.83.0`). Infobulle : la chaîne complète | non |
 | **Needs** | Le coût, voir ci-dessous | non |
 
@@ -422,6 +423,7 @@ Enfreindre une de ces règles est considéré comme un bug, pas comme un choix e
 | Les bots sont disjoints des clients | Rendus sur leur propre ligne (`+8 bots`), jamais additionnés. La barre d'état dit « counted separately ». |
 | Ne jamais laisser croire qu'il reste des places | La capacité n'apparaît **que** comme dénominateur (`21/32`). `capacité − clients` n'est jamais calculé : ce n'est pas observable. |
 | Ne jamais produire un booléen « puis-je entrer ? » | Quatre états, jamais une coche. `Compatible` est explicité : « the server still decides whether you get in ». |
+| Ne jamais appeler l'aller-retour mesuré « le ping du jeu » | La colonne s'appelle **Ping** (c'est le mot que les joueurs cherchent) mais chaque explication est l'honnête : un échantillon unique, mesuré pendant ce balayage, et l'infobulle le dit. `RoundTripMillis` est un type distinct de `PingMillis` côté cœur, pour que les deux ne puissent pas être confondus. |
 | Ne jamais présenter un téléchargement moh-db comme vérifié | Les candidats affichent `tested` (le drapeau du catalogue lui-même), jamais « verified ». |
 | Ne jamais appliquer automatiquement une correspondance ambiguë | Les radios démarrent **sans sélection**. Le total exclut les cartes non tranchées, et le panneau dit combien attendent un choix. |
 | Dire où les fichiers sont allés | Le chemin de repli réel est imprimé, pas un euphémisme. |
@@ -507,7 +509,9 @@ Utile pour ne pas proposer ce qui est déjà là, et pour savoir où sont les vr
   sonde (2,5 s) et le délai master (15 s) sont figés et exposés nulle part. Le seul réglage
   atteignable est le dossier de jeu, via la puce de la barre de titre.
 - **Pas de favoris, pas d'historique, pas de « derniers serveurs joués ».**
-- **Pas de ping.** La latence n'est jamais mesurée ni affichée.
+- **Pas de latence en jeu.** La colonne `Ping` donne l'aller-retour d'**une** requête de statut
+  pendant le balayage ; le ping réel d'une partie n'est jamais mesuré, et aucun historique ni
+  seconde mesure n'existe pour lisser cet échantillon unique.
 - **Pas de liste de joueurs**, ni de noms, ni de scores.
 - **Pas de rafraîchissement automatique ni périodique.** Un balayage est toujours déclenché
   manuellement — sauf le tout premier, lancé automatiquement à l'entrée dans l'écran Servers.
@@ -518,6 +522,8 @@ Utile pour ne pas proposer ce qui est déjà là, et pour savoir où sont les vr
   cible Allied Assault en dur.
 - **Windows uniquement** ; build non packagé, non signé.
 - Aucun tri sur les colonnes `Runs` et `Needs`.
+- `Runs` disparaît sous 1080 px de large, `Ping` sous 960 px : en dessous, les colonnes fixes ne
+  laissent plus assez de place pour lire un nom de serveur.
 - Le champ de recherche filtre **seulement** le nom d'hôte (ni carte, ni adresse, ni version).
 - Aucune notion de profil joueur : pseudo, mot de passe de serveur, réglages de jeu.
 

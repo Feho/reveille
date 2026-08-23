@@ -93,6 +93,20 @@ identify the current Reborn package; a historical receipt identifies only a know
 anything else is version unknown. The setup view distinguishes current / another known build /
 unknown build / absent. Tests cover unchanged and externally changed installed files.
 
+### H11 · Never call the measured round trip the in-game ping
+**Because** Three different numbers get the same word. The engine's ping is an average over a
+live connection; `sv_minPing`/`sv_maxPing` are the server's admission gate; what Reveille has is
+**one** UDP `getstatus` sample taken while fifteen other probes were in flight. It is honest
+about distance and dishonest about latency, and a player who reads it as the second will blame
+the wrong thing when the game stutters.
+**Enforced at** `discovery/model.rs` `RoundTripMillis` is a distinct newtype from `PingMillis`,
+so the two cannot be assigned to each other; the field is `Server::status_round_trip`. The Ping
+column's tooltip (`ui/lib/format.js` `roundTrip`) says "measured once during this check. Not the
+in-game ping." Test:
+`discovery/client.rs::keeps_the_measured_round_trip_apart_from_the_servers_own_ping_gate`.
+**Never** synthesise a value. A server that produced no reply is not listed at all, so there is
+no unknown case to fill in.
+
 ---
 
 ## S — Safety: what Reveille may do to a machine or a server

@@ -13,7 +13,8 @@ pub use client::{
 pub use model::{
     BotsReported, BrowseReport, BrowseSummary, ClientCapacity, ClientsReported, DownloadFlags,
     GamePort, JoinWindowSeconds, MasterEndpoint, NonResult, NonResultReason, PingMillis,
-    ProbeOutcome, ProbeStage, QueryPort, ReportedOccupancy, ReservedSlots, Server, TargetGame,
+    ProbeOutcome, ProbeStage, QueryPort, ReportedOccupancy, ReservedSlots, RoundTripMillis, Server,
+    TargetGame,
 };
 pub use protocol::{
     CryptoError, FieldMap, ParseError, build_master_query, gs_encode, gs_encrypt,

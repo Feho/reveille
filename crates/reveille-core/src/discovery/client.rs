@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use thiserror::Error;
@@ -18,7 +18,7 @@ use tokio::time::timeout;
 use super::model::{
     BotsReported, BrowseReport, ClientCapacity, ClientsReported, DownloadFlags, GamePort,
     JoinWindowSeconds, MasterEndpoint, NonResult, NonResultReason, PingMillis, ProbeOutcome,
-    ProbeStage, ReportedOccupancy, ReservedSlots, Server, TargetGame,
+    ProbeStage, ReportedOccupancy, ReservedSlots, RoundTripMillis, Server, TargetGame,
 };
 use super::protocol::{
     CryptoError, FieldMap, OOB_SEND_HEADER, ParseError, build_master_query, parse_gamespy_status,
@@ -235,10 +235,25 @@ pub async fn query_getstatus(
     port: GamePort,
     deadline: Duration,
 ) -> Result<FieldMap, RequestError> {
+    query_getstatus_measured(address, port, deadline)
+        .await
+        .map(|(fields, _)| fields)
+}
+
+/// `getstatus`, keeping the round trip the request already had to wait for.
+///
+/// The sweep is the only caller that needs the timing, and it gets it for free: this is the same
+/// single request, not an extra probe aimed at a stranger's server.
+async fn query_getstatus_measured(
+    address: Ipv4Addr,
+    port: GamePort,
+    deadline: Duration,
+) -> Result<(FieldMap, RoundTripMillis), RequestError> {
     let mut request = Vec::from(OOB_SEND_HEADER);
     request.extend_from_slice(b"getstatus");
-    let response = udp_request(address, port.get(), &request, deadline).await?;
-    parse_oob_getstatus(&response).map_err(RequestError::from)
+    let (response, round_trip) = udp_request(address, port.get(), &request, deadline).await?;
+    let fields = parse_oob_getstatus(&response).map_err(RequestError::from)?;
+    Ok((fields, round_trip))
 }
 
 /// Send MOHAA `getinfo` with the required five-byte directional header.
@@ -255,7 +270,7 @@ pub async fn query_getinfo(
     let mut request = Vec::from(OOB_SEND_HEADER);
     request.extend_from_slice(b"getinfo ");
     request.extend_from_slice(challenge.as_bytes());
-    let response = udp_request(address, port.get(), &request, deadline).await?;
+    let (response, _) = udp_request(address, port.get(), &request, deadline).await?;
     parse_oob_getinfo(&response).map_err(RequestError::from)
 }
 
@@ -317,14 +332,17 @@ async fn probe_server(endpoint: MasterEndpoint, deadline: Duration) -> ProbeOutc
         Err(reason) => return partial(endpoint, true, ProbeStage::HostPort, reason),
     };
 
-    let status = match query_getstatus(endpoint.address, game_port, deadline).await {
-        Ok(fields) => fields,
-        Err(error) => return partial(endpoint, true, ProbeStage::GetStatus, error.into()),
-    };
+    let (status, round_trip) =
+        match query_getstatus_measured(endpoint.address, game_port, deadline).await {
+            Ok(measured) => measured,
+            Err(error) => return partial(endpoint, true, ProbeStage::GetStatus, error.into()),
+        };
     ProbeOutcome {
         endpoint,
         gamespy_reachable: true,
-        server: Some(build_server(endpoint, game_port, &gamespy, &status)),
+        server: Some(build_server(
+            endpoint, game_port, &gamespy, &status, round_trip,
+        )),
         non_result: None,
     }
 }
@@ -333,7 +351,7 @@ async fn query_gamespy_status(
     endpoint: MasterEndpoint,
     deadline: Duration,
 ) -> Result<FieldMap, RequestError> {
-    let response = udp_request(
+    let (response, _) = udp_request(
         endpoint.address,
         endpoint.query_port.get(),
         GAMESPY_STATUS_REQUEST,
@@ -343,12 +361,16 @@ async fn query_gamespy_status(
     parse_gamespy_status(&response).map_err(RequestError::from)
 }
 
+/// One request/reply exchange, with the time the reply took to come back.
+///
+/// The clock starts after the socket is bound and connected, so the measurement covers the wire
+/// and the server's own turnaround, not this process's setup cost.
 async fn udp_request(
     address: Ipv4Addr,
     port: u16,
     request: &[u8],
     deadline: Duration,
-) -> Result<Vec<u8>, RequestError> {
+) -> Result<(Vec<u8>, RoundTripMillis), RequestError> {
     let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
         .await
         .map_err(RequestError::Network)?;
@@ -356,6 +378,7 @@ async fn udp_request(
         .connect(SocketAddr::V4(SocketAddrV4::new(address, port)))
         .await
         .map_err(RequestError::Network)?;
+    let sent_at = Instant::now();
     timeout(deadline, socket.send(request))
         .await
         .map_err(|_| RequestError::Timeout)?
@@ -365,8 +388,15 @@ async fn udp_request(
         .await
         .map_err(|_| RequestError::Timeout)?
         .map_err(RequestError::Network)?;
+    let round_trip = round_trip_millis(sent_at.elapsed());
     response.truncate(length);
-    Ok(response)
+    Ok((response, round_trip))
+}
+
+/// Saturate rather than wrap. `probe_timeout` keeps real values in the low thousands, so the
+/// clamp only ever fires if a clock jumps.
+fn round_trip_millis(elapsed: Duration) -> RoundTripMillis {
+    RoundTripMillis::new(u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX))
 }
 
 fn build_server(
@@ -374,6 +404,7 @@ fn build_server(
     game_port: GamePort,
     gamespy: &FieldMap,
     status: &FieldMap,
+    status_round_trip: RoundTripMillis,
 ) -> Server {
     let version = nonempty(status, "version");
     // sv_gamespy.c:164 publishes SV_NumClients() as numplayers.
@@ -417,6 +448,7 @@ fn build_server(
             .or_else(|| parse_u32(status, "sv_maxclients"))
             .map(ClientCapacity::new),
         pure: nonempty(status, "pure"),
+        status_round_trip,
     }
 }
 
@@ -487,11 +519,16 @@ impl From<RequestError> for NonResultReason {
 mod tests {
     use std::net::Ipv4Addr;
 
-    use super::{build_server, game_port_from_gamespy, record_duplicate_game_endpoints};
+    use super::{
+        build_server, game_port_from_gamespy, record_duplicate_game_endpoints, round_trip_millis,
+    };
     use crate::discovery::{
         BrowseReport, FieldMap, GamePort, MasterEndpoint, NonResultReason, ProbeOutcome,
-        ProbeStage, QueryPort, TargetGame,
+        ProbeStage, QueryPort, RoundTripMillis, TargetGame,
     };
+
+    /// Stand-in for a measurement the tests do not make; no default exists in production.
+    const MEASURED: RoundTripMillis = RoundTripMillis::new(41);
 
     fn complete_outcome(query_port: u16, game_port: u16) -> ProbeOutcome {
         let endpoint = MasterEndpoint {
@@ -507,6 +544,7 @@ mod tests {
             GamePort::new(game_port),
             &gamespy,
             &FieldMap::new(),
+            MEASURED,
         );
         ProbeOutcome {
             endpoint,
@@ -594,6 +632,7 @@ mod tests {
             game_port_from_gamespy(&gamespy).expect("reply carries hostport"),
             &gamespy,
             &status,
+            MEASURED,
         );
         assert_eq!(server.endpoint.query_port.get(), 12_300);
         assert_eq!(server.game_port.get(), 23_900);
@@ -652,6 +691,7 @@ mod tests {
             game_port_from_gamespy(&gamespy).expect("reply carries hostport"),
             &gamespy,
             &status,
+            MEASURED,
         );
         assert_eq!(
             server
@@ -725,9 +765,50 @@ mod tests {
             game_port_from_gamespy(&gamespy).expect("reply carries hostport"),
             &gamespy,
             &status,
+            MEASURED,
         );
 
         assert_eq!(server.occupancy.bots_reported, None);
         assert_eq!(server.occupancy.total_occupancy(), None);
+    }
+
+    #[test]
+    fn keeps_the_measured_round_trip_apart_from_the_servers_own_ping_gate() {
+        let endpoint = MasterEndpoint {
+            address: Ipv4Addr::new(203, 0, 113, 10),
+            query_port: QueryPort::new(12_300),
+        };
+        let gamespy = FieldMap::from([("hostport".to_owned(), "12203".to_owned())]);
+        // A server whose gate happens to be a round number the round trip is not.
+        let status = FieldMap::from([
+            ("sv_minPing".to_owned(), "0".to_owned()),
+            ("sv_maxPing".to_owned(), "200".to_owned()),
+        ]);
+
+        let server = build_server(
+            endpoint,
+            game_port_from_gamespy(&gamespy).expect("reply carries hostport"),
+            &gamespy,
+            &status,
+            RoundTripMillis::new(137),
+        );
+
+        assert_eq!(server.status_round_trip, RoundTripMillis::new(137));
+        assert_eq!(
+            server.maximum_ping.map(crate::discovery::PingMillis::get),
+            Some(200)
+        );
+    }
+
+    #[test]
+    fn saturates_an_implausible_round_trip_instead_of_wrapping() {
+        assert_eq!(
+            round_trip_millis(std::time::Duration::from_millis(1_500)),
+            RoundTripMillis::new(1_500)
+        );
+        assert_eq!(
+            round_trip_millis(std::time::Duration::from_secs(60 * 60 * 24 * 100)),
+            RoundTripMillis::new(u32::MAX)
+        );
     }
 }

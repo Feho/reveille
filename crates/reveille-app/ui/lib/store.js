@@ -137,6 +137,9 @@ const SORTERS = {
   name: (row) => row.server.hostname.toLowerCase(),
   clients: (row) => row.server.occupancy?.clients_reported ?? -1,
   map: (row) => (row.server.current_map ?? "").toLowerCase(),
+  // Every listed server answered, so a round trip always exists. The fallback sorts a server
+  // that somehow lacks one to the far end rather than pretending it is instant.
+  ping: (row) => row.server.status_round_trip ?? Number.MAX_SAFE_INTEGER,
 };
 
 /** The rows the table should show, after search, filters and sort. */

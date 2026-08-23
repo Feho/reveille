@@ -12,13 +12,30 @@
 // actually means "one click of downloads".
 
 import { el, fill } from "../lib/dom.js";
-import { mapName, needsCell, nonResultReason, occupancy, shortVersion } from "../lib/format.js";
+import {
+  mapName,
+  needsCell,
+  nonResultReason,
+  occupancy,
+  roundTrip,
+  shortVersion,
+} from "../lib/format.js";
 import { saveFilters, state, update, visibleServers } from "../lib/store.js";
 
 const COLUMNS = [
   { key: "name", label: "Server", sortable: true, className: "col-name" },
   { key: "clients", label: "Clients", sortable: true, numeric: true, className: "col-clients" },
   { key: "map", label: "Map now", sortable: true, className: "col-map" },
+  // Ascending first: on a distance column the useful end is the small one, which is the
+  // opposite of Clients, where the busy servers are what a player is looking for.
+  {
+    key: "ping",
+    label: "Ping",
+    sortable: true,
+    numeric: true,
+    defaultDirection: "asc",
+    className: "col-ping",
+  },
   { key: "runs", label: "Runs", sortable: false, className: "col-runs" },
   { key: "needs", label: "Needs", sortable: false, className: "col-needs" },
 ];
@@ -222,7 +239,10 @@ function headerCell(column) {
             if (next.sort.column === column.key) {
               next.sort.direction = next.sort.direction === "asc" ? "desc" : "asc";
             } else {
-              next.sort = { column: column.key, direction: column.numeric ? "desc" : "asc" };
+              next.sort = {
+                column: column.key,
+                direction: column.defaultDirection ?? (column.numeric ? "desc" : "asc"),
+              };
             }
             saveFilters();
           }),
@@ -251,6 +271,7 @@ function toggle(label, onclick) {
 
 function row(item, onSelect) {
   const { clients, bots, capacity } = occupancy(item.server);
+  const ping = roundTrip(item.server);
   const needs = needsCell(item.compatibility);
   const choose = () => {
     if (state.selected !== item.address) onSelect(item.address);
@@ -294,6 +315,11 @@ function row(item, onSelect) {
         { className: "map-cell" },
         item.server.current_map ? mapName(item.server.current_map) : "—",
       ),
+    ),
+    el(
+      "td",
+      { className: "num col-ping" },
+      el("span", { className: "ping-cell", title: ping.title }, ping.text),
     ),
     el(
       "td",

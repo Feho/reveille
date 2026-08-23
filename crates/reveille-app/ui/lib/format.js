@@ -46,6 +46,29 @@ export function occupancy(server) {
 }
 
 /**
+ * The Ping column: the round trip of this sweep's one status request.
+ *
+ * Deliberately not called the in-game ping. It is a single UDP sample taken
+ * while fifteen other probes were in flight, so it says "this server is roughly
+ * this far away", not "you will play at this latency". The tooltip carries that
+ * distinction; the column header cannot.
+ *
+ * The server's own `sv_minPing`/`sv_maxPing` gate is a different number and is
+ * never rendered here.
+ */
+export function roundTrip(server) {
+  const value = server.status_round_trip;
+  if (value === null || value === undefined) return { text: "—", title: null };
+  const millis = Number(value);
+  if (!Number.isFinite(millis)) return { text: "—", title: null };
+  return {
+    text: `${millis} ms`,
+    title:
+      "Time for one status request to this server and back, measured once during this check. Not the in-game ping.",
+  };
+}
+
+/**
  * The full build string, for the detail pane where it has room to wrap.
  * Servers report things like "Medal of Honor Allied Assault 1.11 win-x86 Mar 5 2002".
  */

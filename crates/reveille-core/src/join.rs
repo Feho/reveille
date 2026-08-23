@@ -563,7 +563,7 @@ mod tests {
         FsGame, LaunchCommand, LaunchDialect, LaunchProfile, RejectionKind, explain_rejection,
     };
     use crate::discovery::{
-        GamePort, MasterEndpoint, QueryPort, ReportedOccupancy, Server, TargetGame,
+        GamePort, MasterEndpoint, QueryPort, ReportedOccupancy, RoundTripMillis, Server, TargetGame,
     };
     use crate::mapindex::MapIndex;
 
@@ -832,6 +832,7 @@ mod tests {
             occupancy: ReportedOccupancy::default(),
             client_capacity: None,
             pure: None,
+            status_round_trip: RoundTripMillis::new(0),
         }
     }
 }
