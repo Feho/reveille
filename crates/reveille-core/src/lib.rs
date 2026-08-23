@@ -7,6 +7,7 @@
 pub mod bsp;
 pub mod content;
 pub mod discovery;
+pub mod engine;
 pub mod install;
 pub mod join;
 pub mod mapindex;

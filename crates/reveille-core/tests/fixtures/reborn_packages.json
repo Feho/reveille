@@ -1,0 +1,22 @@
+{
+  "aa": {
+    "filename": "mohreborn_aa.zip",
+    "size": 733577,
+    "sha256": "e38a41810a81e40239245c57d549ee19250f84e46595c1d93d1cddea71d6f333"
+  },
+  "aa_sh": {
+    "filename": "mohreborn_aa_sh.zip",
+    "size": 1537186,
+    "sha256": "fc586d1739fc390709bf07ea9237ae02a24aab84f504a295b5975d0cbc349a45"
+  },
+  "aa_bt": {
+    "filename": "mohreborn_aa_bt.zip",
+    "size": 1553694,
+    "sha256": "7ac402f4d74893c4df06c6d418162812cbfb3060ce353e914bee2d21908e9dc0"
+  },
+  "aa_sh_bt": {
+    "filename": "mohreborn_aa_sh_bt.zip",
+    "size": 2357315,
+    "sha256": "425cbe3a4253f62b9f088c7715d393b17b929b56631f230ebd99de88d45be457"
+  }
+}

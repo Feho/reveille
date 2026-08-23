@@ -98,17 +98,13 @@ There is **one** primary surface. The three-screen wizard was removed.
 ```
 
 - **Setup** (`views/setup.js`) — shown *only* while no install is resolved. Not a welcome page: it
-  answers "where is the game" and says how confidently, distinguishing a verified binary hash from
-  a name-only match. It checks OpenMoHAA's recommended release and offers an install or explicit
-  replacement beside the user's retail assets. A player may instead opt into the newest preview
-  build, which the interface identifies as less tested. Reachable again by clicking the install
-  chip in the titlebar; the chip's tooltip names both the game folder and OpenMoHAA. An existing
-  engine is detected by client-binary presence. When Reveille installed it, a receipt bound to the
-  client file identifies the exact release; an unchanged matching release says **Up to date** and
-  offers reinstall only as a secondary action. A changed or externally installed executable says
-  **Version unknown**, never outdated. Selecting a different known release offers an explicit
-  switch. Refresh re-identifies the game folder as well as the selected release, and installation
-  uses that displayed release rather than performing a second release lookup.
+  answers "where is the game", then asks **How do you want to run the game?** with accessible radio
+  cards for OpenMoHAA, Reborn, and Original game. Their descriptions are neutral; neither community
+  engine receives a recommendation badge. Version, download size, installed state, and active state
+  appear only where relevant. OpenMoHAA's stable/preview selector stays inside its card. Continue is
+  disabled when the selected engine is unavailable. Reborn installation selects and activates it,
+  while switching keeps both managed engines installed. The titlebar chip names the active engine
+  beside the canonical game folder.
 - **Servers** (`views/servers.js`) — where the session lives.
 - **Detail pane** (`views/join.js`) — selection previews the join *in place*. No
   browser → join → back navigation; servers stay comparable; the list never disappears.
@@ -135,6 +131,8 @@ Change a rule in the register first, then update the right-hand column here.
 | **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\moh\main` path, not a euphemism. |
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
 | **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. |
+| **S2** · Never change engine files while an affected program is running | Installation and Original/Reborn activation are blocked unless the relevant process query confirms stopped. Unknown is blocking, not permission. |
+| **S5** · Preserve original executables before installing Reborn | Reborn installation retains first-seen originals. Switching changes the active canonical copies and never describes either managed engine as uninstalled. |
 
 ## 5. The join gate
 

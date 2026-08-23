@@ -163,6 +163,7 @@ enum ClientFlavor {
     #[default]
     OpenMohaa,
     Retail,
+    Reborn,
 }
 
 impl From<ClientFlavor> for platform::ClientKind {
@@ -170,6 +171,7 @@ impl From<ClientFlavor> for platform::ClientKind {
         match value {
             ClientFlavor::OpenMohaa => Self::OpenMohaa,
             ClientFlavor::Retail => Self::Retail,
+            ClientFlavor::Reborn => Self::Reborn,
         }
     }
 }

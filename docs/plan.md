@@ -736,6 +736,43 @@ connection, so nothing may follow it. The CLI's `render_launch_command` fixtures
 
 ---
 
+## Add Reborn as an engine choice *(Windows)*
+
+**Status: implemented (23 Aug 2026).** Setup now asks how the player wants to run the game and
+passes a typed `original` / `openmohaa` / `reborn` choice through browse, preview, cached-preview
+identity, content installation, and launch. OpenMoHAA keeps its argument dialect and writable home
+fallback; Original and Reborn use the retail dialect and game directory. The CLI's existing
+automatic fallback remains compatible and accepts Reborn as an explicit client kind.
+
+Selection is stored in app preferences keyed by the canonical installation root, so choosing
+OpenMoHAA does not require writing into a Program Files installation. A valid saved choice wins;
+an unavailable saved choice blocks rather than falling back. With no saved choice, the sole
+installed community engine wins, Original wins when neither is installed, and two installed
+community engines require an explicit choice. `.reveille-engines/state.json` remains beside the
+managed files and records Original/Reborn package identity and hashes.
+
+Legacy Reborn 1.12 player packages are pinned to official documentation commit
+`15451e40274e718870dcf8ba295bb8fcde745857`. Frozen size/digest metadata selects `aa`, `aa_sh`,
+`aa_bt`, or `aa_sh_bt` from detected data directories. ZIP contents must be exactly the expected
+retail-named executables. Reveille preserves first-seen originals under
+`.reveille-engines/original/`, stores verified Reborn files under `.reveille-engines/reborn/`, and
+transactionally activates either set at the canonical filenames. Process detection covers all
+three retail/Reborn executable names and treats an unknown query as blocking. The newer signed
+`mohreborn/releases` repository had no published releases when rechecked and remains future work.
+
+**Correction from the real archives.** The proposed `aa_sh_bt` digest contained one wrong nibble:
+`425cbe3a4256…`. Downloading the 2,357,315-byte file directly from the immutable commit and hashing
+it produced `425cbe3a4253f62b9f088c7715d393b17b929b56631f230ebd99de88d45be457`.
+The frozen fixture uses the measured value; retaining the proposed value would reject the official
+archive on every install.
+
+Default tests freeze all four mappings and cover metadata, size/digest rejection, unsafe and
+unexpected ZIP entries, missing executables, process parsing, choice persistence, first backup,
+no-clobber reinstall, switching both directions, and process gates. Live installation is restricted
+to a scratch game root; a real player installation is never an acceptance-test target.
+
+---
+
 ## Verification overall
 
 Every milestone is checked against measurements already taken this session rather than against

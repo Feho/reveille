@@ -112,6 +112,25 @@ base : https://api.moh-db.com/api/external/v1/{maps,mods}
   trust-on-first-use: record the digest, never call it verified.
 - `mapName` values carry stray whitespace and inconsistent case — see normalisation below.
 
+### Reborn legacy player packages
+
+The supported Windows player packages come from `mohreborn/mohreborn-docs` commit
+`15451e40274e718870dcf8ba295bb8fcde745857`. The repository's player instructions select a ZIP
+by installed products and replace the canonical retail executable names. Reveille implements the
+same four-way mapping but preserves originals first:
+
+| Data directories | Package | Bytes | SHA-256 |
+|---|---:|---:|---|
+| `main` | `mohreborn_aa.zip` | 733,577 | `e38a41810a81e40239245c57d549ee19250f84e46595c1d93d1cddea71d6f333` |
+| `main` + `mainta` | `mohreborn_aa_sh.zip` | 1,537,186 | `fc586d1739fc390709bf07ea9237ae02a24aab84f504a295b5975d0cbc349a45` |
+| `main` + `maintt` | `mohreborn_aa_bt.zip` | 1,553,694 | `7ac402f4d74893c4df06c6d418162812cbfb3060ce353e914bee2d21908e9dc0` |
+| all three | `mohreborn_aa_sh_bt.zip` | 2,357,315 | `425cbe3a4253f62b9f088c7715d393b17b929b56631f230ebd99de88d45be457` |
+
+The archives contain only `MOHAA.exe`, `moh_spearhead.exe`, and/or
+`moh_breakthrough.exe` beneath one package directory. Exact executable hashes are frozen in
+`platform/reborn.rs`. The newer `mohreborn/releases` repository had **zero published releases on
+23 Aug 2026**; its future signed side-by-side format is intentionally outside this change.
+
 ---
 
 ## 2. Map-name normalisation (exact)

@@ -23,6 +23,7 @@ use reveille_core::discovery::{
     self, BrowseConfig, BrowseEvent, BrowseSummary, NonResult, NonResultReason, ProbeStage, Server,
     TargetGame,
 };
+use reveille_core::engine::EngineChoice;
 use reveille_core::install::{self, Installation};
 use reveille_core::join::{
     CompatibilityAssessment, CompatibilityState, CurrentMapReadiness, FsGame, LaunchCommand,
@@ -32,6 +33,9 @@ use reveille_core::mapindex::{MapIndex, MapKey};
 use reveille_core::platform::openmohaa::{
     ClientActivity, OpenMohaaError, OpenMohaaReleaseClient, ReleaseChannel,
     ReleaseDownloadProgress, ReleasePackage, ReleaseSelector, ReleaseTarget, UpdateOutcome,
+};
+use reveille_core::platform::reborn::{
+    self, DownloadProgress as RebornDownloadProgress, RebornClient,
 };
 use reveille_platform as platform;
 use serde::{Deserialize, Serialize};
@@ -46,6 +50,7 @@ const BROWSE_EVENT: &str = "reveille://browse";
 const PREVIEW_EVENT: &str = "reveille://preview";
 const INSTALL_EVENT: &str = "reveille://install";
 const OPENMOHAA_INSTALL_EVENT: &str = "reveille://openmohaa-install";
+const REBORN_INSTALL_EVENT: &str = "reveille://reborn-install";
 
 /// Bytes between download progress emissions. A 24 MB shopping list produces a few hundred events
 /// rather than tens of thousands.
@@ -69,6 +74,8 @@ struct AppState {
     openmohaa_offers: Mutex<VecDeque<CachedOpenMohaaOffer>>,
     /// Opaque identity generator for cached offers.
     openmohaa_next_offer: AtomicU64,
+    /// Cancellation for the pinned Reborn archive transfer.
+    reborn_cancel: AtomicBool,
 }
 
 const OPENMOHAA_OFFER_CACHE_CAPACITY: usize = 8;
@@ -83,6 +90,7 @@ struct CachedOpenMohaaOffer {
 
 struct CachedPreview {
     install_root: PathBuf,
+    engine: EngineChoice,
     preview: JoinPreview,
 }
 
@@ -156,6 +164,7 @@ struct JoinPreview {
     catalogue: Option<CatalogueResolutionPass>,
     game_directory: PathBuf,
     used_home_fallback: bool,
+    engine: EngineChoice,
 }
 
 /// One map that could not be installed. Structured rather than pre-formatted prose, so the
@@ -181,7 +190,31 @@ struct JoinResult {
     failures: Vec<InstallFailure>,
     game_directory: PathBuf,
     used_home_fallback: bool,
+    engine: EngineChoice,
     outcome: LaunchOutcome,
+}
+
+#[derive(Serialize)]
+struct EngineOverview {
+    inventory: platform::engine::EngineInventory,
+    resolved: Option<EngineChoice>,
+    selection_error: Option<String>,
+    reborn: RebornSummary,
+}
+
+#[derive(Clone, Serialize)]
+struct RebornSummary {
+    version: &'static str,
+    filename: String,
+    size: u64,
+    sha256: &'static str,
+    supported: bool,
+}
+
+#[derive(Serialize)]
+struct RebornInstallResult {
+    engine: EngineChoice,
+    inventory: platform::engine::EngineInventory,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -393,6 +426,111 @@ fn detect_install(selected_path: Option<String>) -> Result<Option<Installation>,
         }
     }
     Ok(None)
+}
+
+#[tauri::command]
+fn engine_overview(
+    path: String,
+    saved_engine: Option<EngineChoice>,
+) -> Result<EngineOverview, String> {
+    let installation = install::identify(path).map_err(|error| error.to_string())?;
+    let package = reborn::package(reborn::RebornProductSet::from_products(
+        &installation.products,
+    ));
+    let resolved = platform::engine::resolve_choice(&installation.root, saved_engine);
+    let (resolved, selection_error) = match resolved {
+        Ok(choice) => (Some(choice), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
+    Ok(EngineOverview {
+        inventory: platform::engine::inventory(&installation.root),
+        resolved,
+        selection_error,
+        reborn: RebornSummary {
+            version: package.version,
+            filename: package.filename,
+            size: package.size,
+            sha256: package.sha256,
+            supported: cfg!(windows),
+        },
+    })
+}
+
+#[tauri::command]
+fn select_engine(path: String, engine: EngineChoice) -> Result<EngineOverview, String> {
+    let installation = install::identify(path).map_err(|error| error.to_string())?;
+    if engine == EngineChoice::Openmohaa {
+        platform::engine::resolve_choice(&installation.root, Some(engine))
+            .map_err(|error| error.to_string())?;
+    } else {
+        platform::engine::activate(
+            &installation.root,
+            engine,
+            platform::engine::retail_activity(),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    engine_overview(
+        installation.root.to_string_lossy().into_owned(),
+        Some(engine),
+    )
+}
+
+#[tauri::command]
+async fn install_reborn(
+    path: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<RebornInstallResult, String> {
+    if !cfg!(windows) {
+        return Err("The pinned Reborn legacy player package supports Windows only.".to_owned());
+    }
+    let _guard = state
+        .openmohaa_install
+        .try_lock()
+        .map_err(|_| "another engine install is already running".to_owned())?;
+    state.reborn_cancel.store(false, Ordering::Release);
+    let installation = install::identify(path).map_err(|error| error.to_string())?;
+    let package = reborn::package(reborn::RebornProductSet::from_products(
+        &installation.products,
+    ));
+    let client = RebornClient::new(Duration::from_secs(120)).map_err(|error| error.to_string())?;
+    let bytes = client
+        .download_reporting(&package, |RebornDownloadProgress { received, total }| {
+            drop(app.emit(
+                REBORN_INSTALL_EVENT,
+                OpenMohaaInstallProgress { received, total },
+            ));
+            if state.reborn_cancel.load(Ordering::Acquire) {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let executables =
+        reborn::inspect_package(&package, &bytes).map_err(|error| error.to_string())?;
+    platform::engine::install_reborn(
+        &installation.root,
+        &package,
+        &executables,
+        platform::engine::retail_activity(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(RebornInstallResult {
+        engine: EngineChoice::Reborn,
+        inventory: platform::engine::inventory(&installation.root),
+    })
+}
+
+#[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Tauri managed state parameter"
+)]
+fn cancel_reborn_install(state: tauri::State<'_, AppState>) {
+    state.reborn_cancel.store(true, Ordering::Release);
 }
 
 #[tauri::command]
@@ -711,11 +849,14 @@ fn cancel_browse(state: tauri::State<'_, AppState>) {
 #[tauri::command]
 async fn browse_servers(
     path: String,
+    engine: EngineChoice,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserPayload, String> {
     let installation = install::identify(&path).map_err(|error| error.to_string())?;
-    let client = platform::detect_client(&installation.root);
+    platform::engine::resolve_choice(&installation.root, Some(engine))
+        .map_err(|error| error.to_string())?;
+    let client = platform::ClientKind::from(engine);
     let target = platform::resolve_install_target(&installation.root, "main", client)
         .map_err(|error| error.to_string())?;
     let index = MapIndex::scan(&target.game_directory).map_err(|error| error.to_string())?;
@@ -894,14 +1035,16 @@ fn describe_non_result(reason: &NonResultReason) -> (&'static str, Option<String
 async fn preview_join(
     path: String,
     address: String,
+    engine: EngineChoice,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<JoinPreview, String> {
     let server = find_server(&state, &address)?;
-    let preview = build_preview(&path, server, Some(&app)).await?;
+    let preview = build_preview(&path, server, engine, Some(&app)).await?;
     if let Ok(mut cache) = state.preview.lock() {
         *cache = Some(CachedPreview {
             install_root: PathBuf::from(&path),
+            engine,
             preview: preview.clone(),
         });
     }
@@ -912,15 +1055,16 @@ async fn preview_join(
 async fn install_and_launch(
     path: String,
     address: String,
+    engine: EngineChoice,
     selected_candidate_ids: Vec<u64>,
     accept_incomplete: bool,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<JoinResult, String> {
     let server = find_server(&state, &address)?;
-    let preview = match take_cached_preview(&state, &path, &address) {
+    let preview = match take_cached_preview(&state, &path, &address, engine) {
         Some(preview) => preview,
-        None => build_preview(&path, server.clone(), Some(&app)).await?,
+        None => build_preview(&path, server.clone(), engine, Some(&app)).await?,
     };
     let (installed, failures) = match &preview.catalogue {
         None => (Vec::new(), Vec::new()),
@@ -941,7 +1085,7 @@ async fn install_and_launch(
     let outcome = if let Some(reason) = launch_refusal(&assessment, accept_incomplete) {
         LaunchOutcome::Refused { reason }
     } else {
-        launch(&path, preview.address)?
+        launch(&path, preview.address, engine)?
     };
     Ok(JoinResult {
         assessment,
@@ -949,6 +1093,7 @@ async fn install_and_launch(
         failures,
         game_directory: preview.game_directory,
         used_home_fallback: preview.used_home_fallback,
+        engine,
         outcome,
     })
 }
@@ -1033,9 +1178,15 @@ async fn install_shopping_list(
 }
 
 /// Start the client the detected install actually provides, connected to `address`.
-fn launch(path: &str, address: SocketAddrV4) -> Result<LaunchOutcome, String> {
+fn launch(
+    path: &str,
+    address: SocketAddrV4,
+    engine: EngineChoice,
+) -> Result<LaunchOutcome, String> {
     let installation = install::identify(path).map_err(|error| error.to_string())?;
-    let kind = platform::detect_client(&installation.root);
+    platform::engine::resolve_choice(&installation.root, Some(engine))
+        .map_err(|error| error.to_string())?;
+    let kind = platform::ClientKind::from(engine);
     let profile = LaunchProfile::new(TargetGame::AlliedAssault);
     let program = platform::default_client(&installation.root, profile.target, kind)
         .to_string_lossy()
@@ -1081,15 +1232,36 @@ fn take_cached_preview(
     state: &tauri::State<'_, AppState>,
     path: &str,
     address: &str,
+    engine: EngineChoice,
 ) -> Option<JoinPreview> {
     let mut cache = state.preview.lock().ok()?;
     let usable = cache.as_ref().is_some_and(|cached| {
-        cached.install_root == Path::new(path) && cached.preview.address.to_string() == address
+        preview_cache_matches(
+            &cached.install_root,
+            cached.preview.address,
+            cached.engine,
+            Path::new(path),
+            address,
+            engine,
+        )
     });
     if !usable {
         return None;
     }
     cache.take().map(|cached| cached.preview)
+}
+
+fn preview_cache_matches(
+    cached_root: &Path,
+    cached_address: SocketAddrV4,
+    cached_engine: EngineChoice,
+    requested_root: &Path,
+    requested_address: &str,
+    requested_engine: EngineChoice,
+) -> bool {
+    cached_root == requested_root
+        && cached_address.to_string() == requested_address
+        && cached_engine == requested_engine
 }
 
 fn find_server(state: &tauri::State<'_, AppState>, address: &str) -> Result<Server, String> {
@@ -1113,10 +1285,13 @@ fn find_server(state: &tauri::State<'_, AppState>, address: &str) -> Result<Serv
 async fn build_preview(
     path: &str,
     server: Server,
+    engine: EngineChoice,
     app: Option<&tauri::AppHandle>,
 ) -> Result<JoinPreview, String> {
     let installation = install::identify(path).map_err(|error| error.to_string())?;
-    let client_kind = platform::detect_client(&installation.root);
+    platform::engine::resolve_choice(&installation.root, Some(engine))
+        .map_err(|error| error.to_string())?;
+    let client_kind = platform::ClientKind::from(engine);
     let target = platform::resolve_install_target(&installation.root, "main", client_kind)
         .map_err(|error| error.to_string())?;
     let index = MapIndex::scan(&target.game_directory).map_err(|error| error.to_string())?;
@@ -1159,6 +1334,7 @@ async fn build_preview(
         catalogue,
         game_directory: target.game_directory,
         used_home_fallback: target.used_home_fallback,
+        engine,
     })
 }
 
@@ -1259,6 +1435,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             detect_install,
+            engine_overview,
+            select_engine,
+            install_reborn,
+            cancel_reborn_install,
             openmohaa_status,
             install_openmohaa,
             cancel_openmohaa_install,
@@ -1292,7 +1472,7 @@ mod tests {
     use super::{
         AppState, OpenMohaaFailure, OpenMohaaFailureKind, OpenMohaaInstalledBuild,
         cache_openmohaa_offer, cached_openmohaa_offer, installed_openmohaa_build, launch_refusal,
-        openmohaa_client_path, record_openmohaa_install,
+        openmohaa_client_path, preview_cache_matches, record_openmohaa_install,
     };
 
     fn assessment(
@@ -1513,6 +1693,28 @@ mod tests {
         );
 
         assert_eq!(launch_refusal(&ready, false), None);
+    }
+
+    #[test]
+    fn preview_cache_identity_includes_the_engine_choice() {
+        let root = Path::new(r"C:\Games\MOHAA");
+        let address = "127.0.0.1:12203".parse().expect("address");
+        assert!(preview_cache_matches(
+            root,
+            address,
+            reveille_core::engine::EngineChoice::Original,
+            root,
+            "127.0.0.1:12203",
+            reveille_core::engine::EngineChoice::Original,
+        ));
+        assert!(!preview_cache_matches(
+            root,
+            address,
+            reveille_core::engine::EngineChoice::Original,
+            root,
+            "127.0.0.1:12203",
+            reveille_core::engine::EngineChoice::Reborn,
+        ));
     }
 
     #[test]

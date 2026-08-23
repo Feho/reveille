@@ -5,10 +5,13 @@
 
 const INSTALL_KEY = "reveille.install";
 const FILTERS_KEY = "reveille.filters";
+const ENGINES_KEY = "reveille.engines";
 
 export const state = {
   /** The identified installation, or null while first run is unresolved. */
   install: null,
+  /** Explicit engine choice for this installation. */
+  engine: null,
 
   /** The folder accepted on a previous run, if any. */
   rememberedInstall: null,
@@ -82,6 +85,25 @@ export function rememberInstall(root) {
 export function recallInstall() {
   try {
     return localStorage.getItem(INSTALL_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function rememberEngine(root, engine) {
+  try {
+    const choices = JSON.parse(localStorage.getItem(ENGINES_KEY) ?? "{}");
+    choices[root] = engine;
+    localStorage.setItem(ENGINES_KEY, JSON.stringify(choices));
+  } catch {
+    // The explicit in-memory choice still works for this session.
+  }
+}
+
+export function recallEngine(root) {
+  try {
+    const engine = JSON.parse(localStorage.getItem(ENGINES_KEY) ?? "{}")[root];
+    return ["original", "openmohaa", "reborn"].includes(engine) ? engine : null;
   } catch {
     return null;
   }

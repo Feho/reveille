@@ -47,20 +47,21 @@ often all of those miss. The manual folder picker is the safety net and its hit 
 it identified the install — a verified binary hash versus a name-only match.
 **Status** Shipped in M5. The measurement is the gap, not the feature.
 
-### F2 · Installing or updating the engine
+### F2 · Choosing, installing, or switching the game program
 
 **Where** Setup.
-**Who it stops** Anyone wanting OpenMoHAA rather than the 2002 retail client — which is most
-people, since it is what modern servers run.
+**Who it stops** Anyone who does not already know the difference between the original game,
+OpenMoHAA, and Reborn, or how to install and safely switch between them.
 **Evidence** *Measured.* Only **11 of 111** live servers report the OpenMoHAA engine string
 (`plan.md:163`), so most servers still accept a retail client — but the engine is where fixes for
 modern Windows land. The install itself was previously a manual download-and-unzip.
-**What Reveille does** One click: selects the right build for the host, checks the download
-arrived intact, and refuses to overwrite a client that is running.
-**Status** Shipped. See issue #1.
-**Known sharp edge** Reveille cannot tell whether an already-installed copy is current, and says
-so rather than guessing. If that turns out to annoy people, recording the installed version is
-the fix.
+**What Reveille does** Presents three neutral, plain-language choices. OpenMoHAA uses its current
+release provider. Reborn uses the official legacy player archive matching the detected data
+directories, pinned to an immutable repository commit. Reveille preserves first-seen original
+executables before Reborn activation, retains both managed copies, checks running programs, and
+remembers the active choice per canonical game folder.
+**Status** Shipped for Windows. Installed versions are identified only from exact package hashes
+or a receipt that still matches the files; unmatched files remain **Version unknown**.
 
 ### F3 · The game folder is not writable
 

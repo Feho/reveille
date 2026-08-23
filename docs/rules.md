@@ -85,13 +85,13 @@ not a reason to discard the other 112.
 **Deliberate exception** C2.
 
 ### H10 · Never recommend replacing an installed engine without version evidence
-**Because** Finding `openmohaa.exe` proves presence, not age. Treating every present executable as
-outdated turns a successful install into a permanent update prompt.
-**Enforced at** `reveille-app/src/main.rs` validates an app-written release receipt against the
-installed client file before calling that exact release current. The setup view distinguishes
-current / another known build / unknown build / absent; only another known build is offered a
-switch, and reinstalling a current build is secondary. Test:
-`a_receipt_only_identifies_the_unchanged_client_and_exact_release`.
+**Because** Finding an engine executable proves presence, not age or provenance. Treating every
+present executable as outdated turns a successful install into a permanent update prompt.
+**Enforced at** `reveille-app/src/main.rs` validates app-written package receipts against the
+installed client files before calling that exact package current. Exact pinned executable hashes
+identify the current Reborn package; a historical receipt identifies only a known other build;
+anything else is version unknown. The setup view distinguishes current / another known build /
+unknown build / absent. Tests cover unchanged and externally changed installed files.
 
 ---
 
@@ -104,17 +104,18 @@ Actually predicting a rejection needs a real `connect`, which on success creates
 someone else's server. That is a join, not a probe.
 **Enforced at** Preflight uses `getstatus` only.
 
-### S2 · Never overwrite release files while one of their programs is running
+### S2 · Never overwrite or activate engine files while one of their programs is running
 **Because** Replacing files used by a live game, dedicated server or launcher corrupts an
 installation, and on Windows fails part-way through.
-**Enforced at** `platform/openmohaa.rs` — `ClientActivity` must be `ConfirmedStopped` before any
-replacement; anything else returns `UpdateOutcome::Deferred`. The activity probe is a closure run
-**after** the download, not before, so a program started mid-transfer is still seen. Test:
-`installs_then_refuses_to_overwrite_while_running_or_unknown`.
-**Scope** The probe covers every executable a release archive replaces, not only `openmohaa.exe`
-— a running dedicated server holds the same files. The platform result also records whether the
-observed process was the game, dedicated server or launcher, so interface copy names only what the
-process list established.
+**Enforced at** package installation and engine activation require a conservative process query
+to confirm that every affected program is stopped. The query is run **after** a download and
+before the transactional apply, so a program started mid-transfer is still seen. An unavailable
+or malformed process result is unknown and blocks the change. Tests cover the OpenMoHAA release
+programs and `MOHAA.exe`, `moh_spearhead.exe`, and `moh_breakthrough.exe`, including case and
+malformed output.
+**Scope** The probe covers every executable a package replaces, not only the selected client — a
+running dedicated server or expansion client can hold another file in the same transaction. The
+platform result records which kind was observed so interface copy states only what was known.
 
 ### S3 · Never raise a UAC prompt mid-journey
 **Because** The ten-minute criterion cannot absorb one, and a player who declines is stranded.
@@ -125,6 +126,16 @@ folder falls back (OpenMoHAA) or is reported as a real blocker (retail, which ha
 **Because** A test that needs a third party is not a test of this code.
 **Enforced at** Fixtures frozen under `tests/fixtures/`; live checks are `#[ignore]` and run only
 via `just live*`.
+
+### S5 · Never install Reborn before preserving existing retail executables
+**Because** Legacy Reborn packages replace the retail executables at their canonical filenames.
+Without an immutable first-seen copy, selecting Reborn could make the player's original program
+impossible to restore.
+**Enforced at** the Reborn activation transaction first copies every existing affected retail
+executable to `.reveille-engines/original/` with no-clobber semantics, then records its hash in
+`.reveille-engines/state.json`. A later install or activation never replaces that backup. Any
+partial activation restores all canonical files. Tests cover first install, reinstall, switching
+both directions, externally changed files, and rollback.
 
 ---
 

@@ -7,4 +7,6 @@
 
 pub mod gog;
 pub mod openmohaa;
+pub mod package;
+pub mod reborn;
 pub mod registry;

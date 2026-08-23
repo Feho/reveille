@@ -62,6 +62,7 @@ function render() {
   if (!ready) return;
 
   $("#install-chip-path").textContent = displayPath(state.install.root);
+  $("#install-chip-engine").textContent = engineLabel(state.engine);
   servers.render();
   join.render();
 }
@@ -110,7 +111,7 @@ async function refresh() {
   });
 
   try {
-    const payload = await browseServers(state.install.root);
+    const payload = await browseServers(state.install.root, state.engine);
     update((next) => {
       next.servers = payload.servers;
       next.summary = payload.summary;
@@ -174,7 +175,7 @@ async function select(address) {
 
   update((next) => (next.previewProgress = { index: -1, of: 0, map: "" }));
   try {
-    const preview = await previewJoin(state.install.root, address);
+    const preview = await previewJoin(state.install.root, address, state.engine);
     if (token !== previewToken) return;
     update((next) => {
       next.preview = preview;
@@ -211,6 +212,7 @@ async function getAndJoin(row, acceptIncomplete) {
     const result = await installAndLaunch(
       state.install.root,
       row.address,
+      state.engine,
       selectedCandidateIds,
       acceptIncomplete,
     );
@@ -273,3 +275,9 @@ document.addEventListener("keydown", (event) => {
 
 notify();
 autoDetect(setup.render, enterServers);
+
+function engineLabel(engine) {
+  if (engine === "openmohaa") return "OpenMoHAA";
+  if (engine === "reborn") return "Reborn";
+  return "Original game";
+}

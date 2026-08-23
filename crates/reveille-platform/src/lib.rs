@@ -14,6 +14,7 @@ use std::fs::{self, OpenOptions};
 use std::process::Command;
 
 use reveille_core::discovery::TargetGame;
+use reveille_core::engine::EngineChoice;
 use reveille_core::join::{LaunchCommand, LaunchDialect};
 use reveille_core::platform::openmohaa::{self, ClientActivity};
 use thiserror::Error;
@@ -85,6 +86,8 @@ pub enum ClientKind {
     OpenMohaa,
     /// Original retail executable for the selected product.
     Retail,
+    /// Reborn retains the retail executable and argument dialect.
+    Reborn,
 }
 
 impl ClientKind {
@@ -93,7 +96,7 @@ impl ClientKind {
     pub const fn dialect(self) -> LaunchDialect {
         match self {
             Self::OpenMohaa => LaunchDialect::OpenMohaa,
-            Self::Retail => LaunchDialect::Retail,
+            Self::Retail | Self::Reborn => LaunchDialect::Retail,
         }
     }
 }
@@ -146,13 +149,16 @@ pub fn openmohaa_activity() -> OpenMohaaActivity {
 #[cfg(any(windows, test))]
 fn tasklist_release_activity(output: &str) -> OpenMohaaActivity {
     let mut activity = OpenMohaaActivity::checked();
+    let mut valid_rows = 0_usize;
     // `tasklist_image_name` lowercases, so this also matches a row spelled `OMohAADed.EXE`.
-    for stem in output
-        .lines()
-        .filter_map(tasklist_image_name)
-        .filter_map(|image| image.strip_suffix(".exe").map(str::to_owned))
-        .filter(|stem| openmohaa::RELEASE_EXECUTABLE_STEMS.contains(&stem.as_str()))
-    {
+    for image in output.lines().filter_map(tasklist_image_name) {
+        valid_rows += 1;
+        let Some(stem) = image.strip_suffix(".exe").map(str::to_owned) else {
+            continue;
+        };
+        if !openmohaa::RELEASE_EXECUTABLE_STEMS.contains(&stem.as_str()) {
+            continue;
+        }
         match stem.as_str() {
             "openmohaa" => activity.observe(OpenMohaaProgram::Game),
             "omohaaded" => activity.observe(OpenMohaaProgram::DedicatedServer),
@@ -161,6 +167,9 @@ fn tasklist_release_activity(output: &str) -> OpenMohaaActivity {
             | "launch_openmohaa_breakthrough" => activity.observe(OpenMohaaProgram::Launcher),
             _ => {}
         }
+    }
+    if !output.trim().is_empty() && valid_rows == 0 {
+        return OpenMohaaActivity::unknown();
     }
     activity
 }
@@ -181,9 +190,11 @@ fn tasklist_image_name(line: &str) -> Option<String> {
 pub fn default_client(install_root: &Path, target: TargetGame, client: ClientKind) -> PathBuf {
     let filename = match (client, target) {
         (ClientKind::OpenMohaa, _) => "openmohaa.exe",
-        (ClientKind::Retail, TargetGame::AlliedAssault) => "MOHAA.exe",
-        (ClientKind::Retail, TargetGame::Spearhead) => "moh_spearhead.exe",
-        (ClientKind::Retail, TargetGame::Breakthrough) => "moh_breakthrough.exe",
+        (ClientKind::Retail | ClientKind::Reborn, TargetGame::AlliedAssault) => "MOHAA.exe",
+        (ClientKind::Retail | ClientKind::Reborn, TargetGame::Spearhead) => "moh_spearhead.exe",
+        (ClientKind::Retail | ClientKind::Reborn, TargetGame::Breakthrough) => {
+            "moh_breakthrough.exe"
+        }
     };
     install_root.join(filename)
 }
@@ -214,7 +225,7 @@ pub fn resolve_install_target(
             game_directory: preferred,
             used_home_fallback: false,
         }),
-        Err(source) if client == ClientKind::Retail => Err(PlatformError::RetailUnwritable {
+        Err(source) if client != ClientKind::OpenMohaa => Err(PlatformError::RetailUnwritable {
             path: preferred,
             source,
         }),
@@ -236,6 +247,18 @@ pub fn resolve_install_target(
         }
     }
 }
+
+impl From<EngineChoice> for ClientKind {
+    fn from(value: EngineChoice) -> Self {
+        match value {
+            EngineChoice::Original => Self::Retail,
+            EngineChoice::Openmohaa => Self::OpenMohaa,
+            EngineChoice::Reborn => Self::Reborn,
+        }
+    }
+}
+
+pub mod engine;
 
 fn probe_writable(directory: &Path) -> io::Result<()> {
     for suffix in 0..16 {
@@ -349,14 +372,21 @@ mod tests {
             &[OpenMohaaProgram::DedicatedServer]
         );
         for output in [
-            "Information : aucune tâche en cours ne correspond aux critères spécifiés.",
             "\"not-openmohaa.exe\",\"8120\",\"Console\",\"1\",\"42,000 K\"",
             "\"openmohaa.exe.bak\",\"8120\",\"Console\",\"1\",\"42,000 K\"",
-            "\"openmohaa.exe\"",
         ] {
             assert_eq!(
                 tasklist_release_activity(output).client_activity(),
                 ClientActivity::ConfirmedStopped
+            );
+        }
+        for output in [
+            "Information : aucune tâche en cours ne correspond aux critères spécifiés.",
+            "\"openmohaa.exe\"",
+        ] {
+            assert_eq!(
+                tasklist_release_activity(output).client_activity(),
+                ClientActivity::Unknown
             );
         }
     }
@@ -399,6 +429,11 @@ mod tests {
             default_client(root, TargetGame::AlliedAssault, ClientKind::OpenMohaa),
             root.join("openmohaa.exe")
         );
+        assert_eq!(
+            default_client(root, TargetGame::AlliedAssault, ClientKind::Reborn),
+            root.join("MOHAA.exe")
+        );
+        assert_eq!(ClientKind::Reborn.dialect(), LaunchDialect::Retail);
     }
 
     #[test]

@@ -10,10 +10,13 @@
 //   install_openmohaa(path, offerId)           -> OpenMohaaInstallResult
 //   cancel_openmohaa_install()                 -> void
 //   pick_install_folder()                      -> string | null
-//   browse_servers(path)                       -> BrowserPayload
+//   engine_overview(path)                      -> EngineOverview
+//   select_engine(path, engine)                -> EngineOverview
+//   install_reborn(path)                       -> RebornInstallResult
+//   browse_servers(path, engine)               -> BrowserPayload
 //   cancel_browse()                            -> void
-//   preview_join(path, address)                -> JoinPreview
-//   install_and_launch(path, address, selectedCandidateIds, acceptIncomplete) -> JoinResult
+//   preview_join(path, address, engine)         -> JoinPreview
+//   install_and_launch(path, address, engine, selectedCandidateIds, acceptIncomplete) -> JoinResult
 //
 // Events:
 //   reveille://browse   BrowseProgress   { registered, inspected, probed, answered, non_results, row }
@@ -27,6 +30,12 @@ const listen = tauri.event.listen;
 
 export const detectInstall = (selectedPath = null) => invoke("detect_install", { selectedPath });
 
+export const engineOverview = (path, savedEngine = null) =>
+  invoke("engine_overview", { path, savedEngine });
+export const selectEngine = (path, engine) => invoke("select_engine", { path, engine });
+export const installReborn = (path) => invoke("install_reborn", { path });
+export const cancelRebornInstall = () => invoke("cancel_reborn_install");
+
 export const openMohaaStatus = (path, channel) =>
   invoke("openmohaa_status", { path, channel });
 
@@ -37,20 +46,21 @@ export const cancelOpenMohaaInstall = () => invoke("cancel_openmohaa_install");
 
 export const pickInstallFolder = () => invoke("pick_install_folder");
 
-export const browseServers = (path) => invoke("browse_servers", { path });
+export const browseServers = (path, engine) => invoke("browse_servers", { path, engine });
 
 export const cancelBrowse = () => invoke("cancel_browse");
 
-export const previewJoin = (path, address) => invoke("preview_join", { path, address });
+export const previewJoin = (path, address, engine) => invoke("preview_join", { path, address, engine });
 
-export const installAndLaunch = (path, address, selectedCandidateIds, acceptIncomplete) =>
-  invoke("install_and_launch", { path, address, selectedCandidateIds, acceptIncomplete });
+export const installAndLaunch = (path, address, engine, selectedCandidateIds, acceptIncomplete) =>
+  invoke("install_and_launch", { path, address, engine, selectedCandidateIds, acceptIncomplete });
 
 export const onBrowseProgress = (handler) => on("reveille://browse", handler);
 export const onPreviewProgress = (handler) => on("reveille://preview", handler);
 export const onInstallProgress = (handler) => on("reveille://install", handler);
 export const onOpenMohaaInstallProgress = (handler) =>
   on("reveille://openmohaa-install", handler);
+export const onRebornInstallProgress = (handler) => on("reveille://reborn-install", handler);
 
 function on(name, handler) {
   return listen(name, (event) => handler(event.payload));

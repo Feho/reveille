@@ -5,17 +5,19 @@
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 use std::fs::{self, File};
-use std::io::{self, Cursor, Write as IoWrite};
+use std::io::{self, Cursor};
 use std::ops::ControlFlow;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::TempDir;
 use thiserror::Error;
 use zip::ZipArchive;
+
+use super::package::{self as package_io, OverlayFile};
 
 // GitHub REST Releases API: /releases/latest excludes prereleases, including OpenMoHAA's rolling
 // `dev` release. https://docs.github.com/rest/releases/releases#get-the-latest-release
@@ -433,50 +435,27 @@ impl OpenMohaaReleaseClient {
         A: FnOnce() -> ClientActivity,
         F: FnMut(ReleaseDownloadProgress) -> ControlFlow<()>,
     {
-        let mut response = self
-            .client
-            .get(&package.download_url)
-            .send()
-            .await
-            .map_err(OpenMohaaError::Network)?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(OpenMohaaError::HttpStatus(status.as_u16()));
-        }
-        let declared = response.content_length();
-        if let Some(size) = declared.filter(|length| *length > MAX_RELEASE_BYTES) {
-            return Err(OpenMohaaError::AssetTooLarge {
-                size,
-                maximum: MAX_RELEASE_BYTES,
-            });
-        }
-        if report(ReleaseDownloadProgress {
-            received: 0,
-            total: declared.or(Some(package.size)),
-        })
-        .is_break()
-        {
-            return Err(OpenMohaaError::DownloadCancelled);
-        }
-        let mut bytes = Vec::with_capacity(usize::try_from(package.size).unwrap_or_default());
-        while let Some(chunk) = response.chunk().await.map_err(OpenMohaaError::Network)? {
-            let next_size = bytes.len().saturating_add(chunk.len());
-            if next_size as u64 > MAX_RELEASE_BYTES {
-                return Err(OpenMohaaError::AssetTooLarge {
-                    size: next_size as u64,
-                    maximum: MAX_RELEASE_BYTES,
-                });
+        let bytes = package_io::download_reporting(
+            &self.client,
+            &package.download_url,
+            package.size,
+            MAX_RELEASE_BYTES,
+            |progress| {
+                report(ReleaseDownloadProgress {
+                    received: progress.received,
+                    total: progress.total,
+                })
+            },
+        )
+        .await
+        .map_err(|error| match error {
+            package_io::DownloadError::Network(source) => OpenMohaaError::Network(source),
+            package_io::DownloadError::HttpStatus(status) => OpenMohaaError::HttpStatus(status),
+            package_io::DownloadError::TooLarge { size, maximum } => {
+                OpenMohaaError::AssetTooLarge { size, maximum }
             }
-            bytes.extend_from_slice(&chunk);
-            if report(ReleaseDownloadProgress {
-                received: bytes.len() as u64,
-                total: declared.or(Some(package.size)),
-            })
-            .is_break()
-            {
-                return Err(OpenMohaaError::DownloadCancelled);
-            }
-        }
+            package_io::DownloadError::Cancelled => OpenMohaaError::DownloadCancelled,
+        })?;
         install_verified_archive(package, &bytes, destination, probe_activity())
     }
 }
@@ -493,19 +472,17 @@ pub fn install_verified_archive(
     destination: impl AsRef<Path>,
     activity: ClientActivity,
 ) -> Result<UpdateOutcome, OpenMohaaError> {
-    if bytes.len() as u64 != package.size {
-        return Err(OpenMohaaError::SizeMismatch {
-            expected: package.size,
-            actual: bytes.len() as u64,
-        });
-    }
-    let actual = PublishedSha256::from_bytes(bytes);
-    if actual != package.digest {
-        return Err(OpenMohaaError::DigestMismatch {
-            expected: package.digest,
-            actual,
-        });
-    }
+    package_io::verify_sha256(bytes, package.size, &package.digest.to_hex()).map_err(|error| {
+        match error {
+            package_io::VerifyError::Size { expected, actual } => {
+                OpenMohaaError::SizeMismatch { expected, actual }
+            }
+            package_io::VerifyError::Digest { .. } => OpenMohaaError::DigestMismatch {
+                expected: package.digest,
+                actual: PublishedSha256::from_bytes(bytes),
+            },
+        }
+    })?;
     let destination = destination.as_ref();
     let entries = inspect_archive(bytes)?;
     let replacements = entries
@@ -604,18 +581,8 @@ fn is_known_unix_executable(path: &Path) -> bool {
 }
 
 fn safe_archive_path(value: &str) -> Result<PathBuf, OpenMohaaError> {
-    let normalized = value.replace('\\', "/");
-    if normalized.is_empty() || normalized.starts_with('/') || normalized.contains(':') {
-        return Err(OpenMohaaError::UnsafeArchiveEntry(value.to_owned()));
-    }
-    let path = PathBuf::from(&normalized);
-    if !path
-        .components()
-        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
-    {
-        return Err(OpenMohaaError::UnsafeArchiveEntry(value.to_owned()));
-    }
-    Ok(path)
+    package_io::safe_archive_path(value)
+        .ok_or_else(|| OpenMohaaError::UnsafeArchiveEntry(value.to_owned()))
 }
 
 fn extract_archive(bytes: &[u8], staging: &Path) -> Result<(), OpenMohaaError> {
@@ -648,12 +615,6 @@ fn extract_archive(bytes: &[u8], staging: &Path) -> Result<(), OpenMohaaError> {
     Ok(())
 }
 
-struct PreparedFile {
-    target: PathBuf,
-    replacement: Option<NamedTempFile>,
-    backup: Option<NamedTempFile>,
-}
-
 fn apply_staged_files(
     staging: &TempDir,
     destination: &Path,
@@ -664,87 +625,30 @@ fn apply_staged_files(
         path: destination.to_path_buf(),
         source,
     })?;
-    let mut prepared = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let source = staging.path().join(&entry.path);
-        let target = destination.join(&entry.path);
-        let parent = target
-            .parent()
-            .ok_or_else(|| OpenMohaaError::NoDestinationParent(target.clone()))?;
-        fs::create_dir_all(parent).map_err(|source| OpenMohaaError::Filesystem {
-            path: parent.to_path_buf(),
+    let sources = entries
+        .iter()
+        .map(|entry| staging.path().join(&entry.path))
+        .collect::<Vec<_>>();
+    let overlays = entries
+        .iter()
+        .zip(&sources)
+        .map(|(entry, source)| OverlayFile {
             source,
-        })?;
-        if target.is_dir() {
-            return Err(OpenMohaaError::TargetIsDirectory(target));
+            target: destination.join(&entry.path),
+            #[cfg(unix)]
+            executable: entry.executable,
+            #[cfg(not(unix))]
+            executable: false,
+        })
+        .collect::<Vec<_>>();
+    package_io::transactional_overlay(&overlays).map_err(|error| match error {
+        package_io::ApplyError::NoParent(path) => OpenMohaaError::NoDestinationParent(path),
+        package_io::ApplyError::TargetDirectory(path) => OpenMohaaError::TargetIsDirectory(path),
+        package_io::ApplyError::Incomplete => OpenMohaaError::IncompleteTransaction,
+        package_io::ApplyError::Filesystem { path, source } => {
+            OpenMohaaError::Filesystem { path, source }
         }
-        let backup = if target.exists() {
-            let backup =
-                NamedTempFile::new_in(parent).map_err(|source| OpenMohaaError::Filesystem {
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
-            fs::copy(&target, backup.path()).map_err(|source| OpenMohaaError::Filesystem {
-                path: target.clone(),
-                source,
-            })?;
-            Some(backup)
-        } else {
-            None
-        };
-        let mut replacement =
-            NamedTempFile::new_in(parent).map_err(|source| OpenMohaaError::Filesystem {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        let mut input = File::open(&source).map_err(|source_error| OpenMohaaError::Filesystem {
-            path: source.clone(),
-            source: source_error,
-        })?;
-        io::copy(&mut input, &mut replacement).map_err(|source_error| {
-            OpenMohaaError::Filesystem {
-                path: target.clone(),
-                source: source_error,
-            }
-        })?;
-        #[cfg(unix)]
-        if entry.executable {
-            use std::os::unix::fs::PermissionsExt as _;
-
-            fs::set_permissions(replacement.path(), fs::Permissions::from_mode(0o755)).map_err(
-                |source| OpenMohaaError::Filesystem {
-                    path: target.clone(),
-                    source,
-                },
-            )?;
-        }
-        replacement
-            .flush()
-            .map_err(|source| OpenMohaaError::Filesystem {
-                path: target.clone(),
-                source,
-            })?;
-        prepared.push(PreparedFile {
-            target,
-            replacement: Some(replacement),
-            backup,
-        });
-    }
-
-    for index in 0..prepared.len() {
-        let Some(replacement) = prepared[index].replacement.take() else {
-            rollback(&mut prepared, index);
-            return Err(OpenMohaaError::IncompleteTransaction);
-        };
-        if let Err(error) = replacement.persist(&prepared[index].target) {
-            let target = prepared[index].target.clone();
-            rollback(&mut prepared, index);
-            return Err(OpenMohaaError::Filesystem {
-                path: target,
-                source: error.error,
-            });
-        }
-    }
+    })?;
 
     if replacements == 0 {
         Ok(UpdateOutcome::Installed {
@@ -755,16 +659,6 @@ fn apply_staged_files(
             files: entries.len(),
             replaced: replacements,
         })
-    }
-}
-
-fn rollback(prepared: &mut [PreparedFile], committed: usize) {
-    for file in prepared[..committed].iter_mut().rev() {
-        if let Some(backup) = file.backup.take() {
-            let _ = backup.persist(&file.target);
-        } else {
-            let _ = fs::remove_file(&file.target);
-        }
     }
 }
 
