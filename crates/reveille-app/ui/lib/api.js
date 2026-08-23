@@ -6,6 +6,9 @@
 //
 // Commands (crates/reveille-app/src/main.rs):
 //   detect_install(selectedPath?)              -> Installation | null
+//   openmohaa_status(path, channel)            -> OpenMohaaStatus
+//   install_openmohaa(path, offerId)           -> OpenMohaaInstallResult
+//   cancel_openmohaa_install()                 -> void
 //   pick_install_folder()                      -> string | null
 //   browse_servers(path)                       -> BrowserPayload
 //   cancel_browse()                            -> void
@@ -16,12 +19,21 @@
 //   reveille://browse   BrowseProgress   { registered, inspected, probed, answered, non_results, row }
 //   reveille://preview  PreviewProgress  { address, index, of, map }
 //   reveille://install  InstallProgress  { map, filename, index, of, phase, ... }
+//   reveille://openmohaa-install OpenMohaaInstallProgress { received, total }
 
 const tauri = window.__TAURI__;
 const invoke = tauri.core.invoke;
 const listen = tauri.event.listen;
 
 export const detectInstall = (selectedPath = null) => invoke("detect_install", { selectedPath });
+
+export const openMohaaStatus = (path, channel) =>
+  invoke("openmohaa_status", { path, channel });
+
+export const installOpenMohaa = (path, offerId) =>
+  invoke("install_openmohaa", { path, offerId });
+
+export const cancelOpenMohaaInstall = () => invoke("cancel_openmohaa_install");
 
 export const pickInstallFolder = () => invoke("pick_install_folder");
 
@@ -37,6 +49,8 @@ export const installAndLaunch = (path, address, selectedCandidateIds, acceptInco
 export const onBrowseProgress = (handler) => on("reveille://browse", handler);
 export const onPreviewProgress = (handler) => on("reveille://preview", handler);
 export const onInstallProgress = (handler) => on("reveille://install", handler);
+export const onOpenMohaaInstallProgress = (handler) =>
+  on("reveille://openmohaa-install", handler);
 
 function on(name, handler) {
   return listen(name, (event) => handler(event.payload));

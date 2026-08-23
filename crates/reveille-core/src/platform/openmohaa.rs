@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 use std::fs::{self, File};
 use std::io::{self, Cursor, Write as IoWrite};
+use std::ops::ControlFlow;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -16,10 +17,28 @@ use tempfile::{NamedTempFile, TempDir};
 use thiserror::Error;
 use zip::ZipArchive;
 
-// GitHub REST Releases API for the official openmoh/openmohaa repository.
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openmoh/openmohaa/releases/latest";
+// GitHub REST Releases API: /releases/latest excludes prereleases, including OpenMoHAA's rolling
+// `dev` release. https://docs.github.com/rest/releases/releases#get-the-latest-release
+const STABLE_RELEASE_URL: &str = "https://api.github.com/repos/openmoh/openmohaa/releases/latest";
+// OpenMoHAA publishes its opt-in rolling build as the `dev` prerelease tag.
+const DEV_RELEASE_URL: &str = "https://api.github.com/repos/openmoh/openmohaa/releases/tags/dev";
 const USER_AGENT: &str = "Reveille/0.1 (+https://github.com/openmoh/openmohaa)";
 const MAX_RELEASE_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Executable stems every `OpenMoHAA` release archive installs, without a platform extension.
+///
+/// Read from the openmoh/openmohaa v0.82.1 archive central directories: the Windows archives
+/// carry these five with an `.exe` suffix, the Linux and macOS archives carry them bare. Shared
+/// libraries (`game`, `cgame`, SDL, curl, OpenAL) are deliberately absent — they are loaded, not
+/// executed. Callers use this both to mark Unix binaries executable and to decide which process
+/// names hold a lock on an installation.
+pub const RELEASE_EXECUTABLE_STEMS: [&str; 5] = [
+    "openmohaa",
+    "omohaaded",
+    "launch_openmohaa_base",
+    "launch_openmohaa_spearhead",
+    "launch_openmohaa_breakthrough",
+];
 
 /// SHA-256 digest published in a GitHub Release asset's `digest` field.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
@@ -79,25 +98,125 @@ impl fmt::Display for PublishedSha256 {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseTarget {
+    LinuxAmd64,
+    LinuxArm64,
+    LinuxArmhf,
+    LinuxI686,
+    MacosArm64,
+    MacosX64,
     WindowsX64,
     WindowsX86,
     WindowsArm64,
 }
 
 impl ReleaseTarget {
-    const fn asset_suffix(self) -> &'static str {
-        match self {
-            Self::WindowsX64 => "-windows-x64.zip",
-            Self::WindowsX86 => "-windows-x86.zip",
-            Self::WindowsArm64 => "-windows-arm64.zip",
+    /// Resolve the Rust compilation host without substituting a nearby architecture.
+    ///
+    /// # Errors
+    ///
+    /// Returns the actual OS and architecture when `OpenMoHAA` publishes no supported archive for
+    /// the host.
+    pub fn for_host() -> Result<Self, UnsupportedHost> {
+        Self::for_platform(std::env::consts::OS, std::env::consts::ARCH)
+    }
+
+    fn for_platform(os: &str, architecture: &str) -> Result<Self, UnsupportedHost> {
+        match (os, architecture) {
+            ("linux", "x86_64") => Ok(Self::LinuxAmd64),
+            ("linux", "aarch64") => Ok(Self::LinuxArm64),
+            ("linux", "arm") => Ok(Self::LinuxArmhf),
+            ("linux", "x86") => Ok(Self::LinuxI686),
+            ("macos", "aarch64") => Ok(Self::MacosArm64),
+            ("macos", "x86_64") => Ok(Self::MacosX64),
+            ("windows", "x86_64") => Ok(Self::WindowsX64),
+            ("windows", "x86") => Ok(Self::WindowsX86),
+            ("windows", "aarch64") => Ok(Self::WindowsArm64),
+            _ => Err(UnsupportedHost {
+                os: os.to_owned(),
+                architecture: architecture.to_owned(),
+            }),
         }
     }
+
+    const fn asset_suffix(self, channel: ReleaseChannel) -> &'static str {
+        // openmoh/openmohaa .github/workflows/tags-publish-release.yml, verified at v0.82.1.
+        // Exact suffixes deliberately exclude stable Windows `-pdb.zip`/`.msi` assets and the
+        // unsupported PowerPC archives. The dev channel only publishes complete Windows builds
+        // inside its `-pdb.zip` assets. Both macOS hosts intentionally select one universal asset.
+        match (channel, self) {
+            (_, Self::LinuxAmd64) => "-linux-amd64.zip",
+            (_, Self::LinuxArm64) => "-linux-arm64.zip",
+            (_, Self::LinuxArmhf) => "-linux-armhf.zip",
+            (_, Self::LinuxI686) => "-linux-i686.zip",
+            (_, Self::MacosArm64 | Self::MacosX64) => "-macos-multiarch-arm64-x86_64.zip",
+            (ReleaseChannel::Stable, Self::WindowsX64) => "-windows-x64.zip",
+            (ReleaseChannel::Stable, Self::WindowsX86) => "-windows-x86.zip",
+            (ReleaseChannel::Stable, Self::WindowsArm64) => "-windows-arm64.zip",
+            (ReleaseChannel::Dev, Self::WindowsX64) => "-windows-x64-pdb.zip",
+            (ReleaseChannel::Dev, Self::WindowsX86) => "-windows-x86-pdb.zip",
+            (ReleaseChannel::Dev, Self::WindowsArm64) => "-windows-arm64-pdb.zip",
+        }
+    }
+}
+
+/// Release stream used for its endpoint, asset suffix table, and update identity.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseChannel {
+    /// Versioned release returned by GitHub's latest stable endpoint.
+    Stable,
+    /// Opt-in rolling prerelease built from the latest `OpenMoHAA` commit.
+    Dev,
+}
+
+impl ReleaseChannel {
+    const fn endpoint(self) -> &'static str {
+        match self {
+            Self::Stable => STABLE_RELEASE_URL,
+            Self::Dev => DEV_RELEASE_URL,
+        }
+    }
+}
+
+/// Channel and host target needed to select one exact release asset.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct ReleaseSelector {
+    pub channel: ReleaseChannel,
+    pub target: ReleaseTarget,
+}
+
+impl ReleaseSelector {
+    #[must_use]
+    pub const fn stable(target: ReleaseTarget) -> Self {
+        Self {
+            channel: ReleaseChannel::Stable,
+            target,
+        }
+    }
+
+    #[must_use]
+    pub const fn dev(target: ReleaseTarget) -> Self {
+        Self {
+            channel: ReleaseChannel::Dev,
+            target,
+        }
+    }
+}
+
+/// Unsupported host returned without guessing another `OpenMoHAA` archive.
+#[derive(Clone, Debug, Eq, Error, PartialEq, Serialize)]
+#[error("OpenMoHAA publishes no supported archive for {os}/{architecture}")]
+pub struct UnsupportedHost {
+    pub os: String,
+    pub architecture: String,
 }
 
 /// One digest-bearing portable release archive.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ReleasePackage {
-    /// Git tag returned by the latest-release endpoint.
+    /// Release stream that supplied this package.
+    pub channel: ReleaseChannel,
+    /// Stable tag or rolling dev release name; the latter contains the source commit identity.
     pub version: String,
     /// Exact release asset filename.
     pub asset_name: String,
@@ -141,23 +260,36 @@ pub enum UpdateOutcome {
     Deferred { reason: UpdateDeferredReason },
 }
 
-/// Parse a frozen or live GitHub latest-release response and select a portable Windows archive.
+/// Bytes received while downloading one release archive.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReleaseDownloadProgress {
+    pub received: u64,
+    pub total: Option<u64>,
+}
+
+/// Parse a frozen or live GitHub release response and select one exact portable archive.
 ///
 /// # Errors
 ///
-/// Returns an error for malformed JSON, no matching asset, or a missing/invalid published digest.
-pub fn parse_latest_release(
+/// Returns an error for malformed JSON, a missing/ambiguous asset, a missing dev identity, or a
+/// missing/invalid published digest.
+pub fn parse_release(
     json: &str,
-    target: ReleaseTarget,
+    selector: ReleaseSelector,
 ) -> Result<ReleasePackage, OpenMohaaError> {
     let release: RawRelease =
         serde_json::from_str(json).map_err(OpenMohaaError::MalformedRelease)?;
-    let suffix = target.asset_suffix();
-    let asset = release
+    let suffix = selector.target.asset_suffix(selector.channel);
+    let mut matching_assets = release
         .assets
         .into_iter()
-        .find(|asset| asset.name.ends_with(suffix))
-        .ok_or(OpenMohaaError::MissingAsset(target))?;
+        .filter(|asset| asset.name.ends_with(suffix));
+    let asset = matching_assets
+        .next()
+        .ok_or(OpenMohaaError::MissingAsset(selector))?;
+    if matching_assets.next().is_some() {
+        return Err(OpenMohaaError::AmbiguousAsset(selector));
+    }
     let digest = asset
         .digest
         .ok_or_else(|| OpenMohaaError::MissingDigest(asset.name.clone()))
@@ -168,13 +300,30 @@ pub fn parse_latest_release(
             maximum: MAX_RELEASE_BYTES,
         });
     }
+    let version = match selector.channel {
+        ReleaseChannel::Stable => release.tag_name,
+        ReleaseChannel::Dev => release.name.ok_or(OpenMohaaError::MissingDevIdentity)?,
+    };
     Ok(ReleasePackage {
-        version: release.tag_name,
+        channel: selector.channel,
+        version,
         asset_name: asset.name,
         download_url: asset.browser_download_url,
         size: asset.size,
         digest,
     })
+}
+
+/// Parse GitHub's latest stable-release response for a target.
+///
+/// # Errors
+///
+/// Returns the same errors as [`parse_release`].
+pub fn parse_latest_release(
+    json: &str,
+    target: ReleaseTarget,
+) -> Result<ReleasePackage, OpenMohaaError> {
+    parse_release(json, ReleaseSelector::stable(target))
 }
 
 /// GitHub client for the official `OpenMoHAA` latest release.
@@ -198,18 +347,18 @@ impl OpenMohaaReleaseClient {
         Ok(Self { client })
     }
 
-    /// Fetch and select the latest portable archive for a Windows target.
+    /// Fetch and select one portable archive from an explicit release channel.
     ///
     /// # Errors
     ///
     /// Returns an error for HTTP, JSON, asset-selection, or digest failures.
-    pub async fn latest_release(
+    pub async fn release(
         &self,
-        target: ReleaseTarget,
+        selector: ReleaseSelector,
     ) -> Result<ReleasePackage, OpenMohaaError> {
         let response = self
             .client
-            .get(LATEST_RELEASE_URL)
+            .get(selector.channel.endpoint())
             .header("Accept", "application/vnd.github+json")
             .send()
             .await
@@ -219,21 +368,71 @@ impl OpenMohaaReleaseClient {
             return Err(OpenMohaaError::HttpStatus(status.as_u16()));
         }
         let text = response.text().await.map_err(OpenMohaaError::Network)?;
-        parse_latest_release(&text, target)
+        parse_release(&text, selector)
+    }
+
+    /// Fetch and select the latest stable portable archive for a target.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for HTTP, JSON, asset-selection, or digest failures.
+    pub async fn latest_release(
+        &self,
+        target: ReleaseTarget,
+    ) -> Result<ReleasePackage, OpenMohaaError> {
+        self.release(ReleaseSelector::stable(target)).await
     }
 
     /// Download, verify, and transactionally overlay one release archive.
+    ///
+    /// `probe_activity` runs after the transfer completes rather than before it, so a client
+    /// started while the archive was downloading is still seen. The caller supplies the probe;
+    /// this crate performs no process inspection of its own.
     ///
     /// # Errors
     ///
     /// Returns an error before installation for network, size, or digest failures, and retains
     /// existing target files if an individual atomic replacement fails.
-    pub async fn download_and_install(
+    pub async fn download_and_install<A>(
         &self,
         package: &ReleasePackage,
         destination: impl AsRef<Path>,
-        activity: ClientActivity,
-    ) -> Result<UpdateOutcome, OpenMohaaError> {
+        probe_activity: A,
+    ) -> Result<UpdateOutcome, OpenMohaaError>
+    where
+        A: FnOnce() -> ClientActivity,
+    {
+        self.download_and_install_reporting(package, destination, probe_activity, |_| {
+            ControlFlow::Continue(())
+        })
+        .await
+    }
+
+    /// Download, verify, and transactionally overlay one release archive while reporting bytes.
+    ///
+    /// Returning [`ControlFlow::Break`] from `report` cancels before archive verification or any
+    /// installation write.
+    ///
+    /// `probe_activity` is deliberately a closure rather than a [`ClientActivity`] value, and it
+    /// runs only once the whole archive has arrived. Sampling before a multi-megabyte transfer
+    /// leaves a window in which the player starts the client mid-download, which would turn an
+    /// honest [`UpdateOutcome::Deferred`] into a locked-file failure part-way through the apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before installation for network, size, digest, or cancellation failures,
+    /// and retains existing target files if an individual atomic replacement fails.
+    pub async fn download_and_install_reporting<A, F>(
+        &self,
+        package: &ReleasePackage,
+        destination: impl AsRef<Path>,
+        probe_activity: A,
+        mut report: F,
+    ) -> Result<UpdateOutcome, OpenMohaaError>
+    where
+        A: FnOnce() -> ClientActivity,
+        F: FnMut(ReleaseDownloadProgress) -> ControlFlow<()>,
+    {
         let mut response = self
             .client
             .get(&package.download_url)
@@ -244,14 +443,20 @@ impl OpenMohaaReleaseClient {
         if !status.is_success() {
             return Err(OpenMohaaError::HttpStatus(status.as_u16()));
         }
-        if let Some(size) = response
-            .content_length()
-            .filter(|length| *length > MAX_RELEASE_BYTES)
-        {
+        let declared = response.content_length();
+        if let Some(size) = declared.filter(|length| *length > MAX_RELEASE_BYTES) {
             return Err(OpenMohaaError::AssetTooLarge {
                 size,
                 maximum: MAX_RELEASE_BYTES,
             });
+        }
+        if report(ReleaseDownloadProgress {
+            received: 0,
+            total: declared.or(Some(package.size)),
+        })
+        .is_break()
+        {
+            return Err(OpenMohaaError::DownloadCancelled);
         }
         let mut bytes = Vec::with_capacity(usize::try_from(package.size).unwrap_or_default());
         while let Some(chunk) = response.chunk().await.map_err(OpenMohaaError::Network)? {
@@ -263,8 +468,16 @@ impl OpenMohaaReleaseClient {
                 });
             }
             bytes.extend_from_slice(&chunk);
+            if report(ReleaseDownloadProgress {
+                received: bytes.len() as u64,
+                total: declared.or(Some(package.size)),
+            })
+            .is_break()
+            {
+                return Err(OpenMohaaError::DownloadCancelled);
+            }
         }
-        install_verified_archive(package, &bytes, destination, activity)
+        install_verified_archive(package, &bytes, destination, probe_activity())
     }
 }
 
@@ -336,6 +549,8 @@ pub fn install_verified_archive(
 #[derive(Clone)]
 struct ArchiveEntry {
     path: PathBuf,
+    #[cfg(unix)]
+    executable: bool,
 }
 
 fn inspect_archive(bytes: &[u8]) -> Result<Vec<ArchiveEntry>, OpenMohaaError> {
@@ -362,12 +577,30 @@ fn inspect_archive(bytes: &[u8]) -> Result<Vec<ArchiveEntry>, OpenMohaaError> {
                 entry.name().to_owned(),
             ));
         }
-        entries.push(ArchiveEntry { path });
+        #[cfg(unix)]
+        let executable = is_known_unix_executable(&path);
+        entries.push(ArchiveEntry {
+            path,
+            #[cfg(unix)]
+            executable,
+        });
     }
     if entries.is_empty() {
         return Err(OpenMohaaError::EmptyArchive);
     }
     Ok(entries)
+}
+
+#[cfg(any(unix, test))]
+fn is_known_unix_executable(path: &Path) -> bool {
+    // Unix archives ship these flat binaries as 0644 (see RELEASE_EXECUTABLE_STEMS). Shared
+    // libraries are omitted intentionally; loading them does not require an executable bit.
+    path.parent()
+        .is_some_and(|parent| parent.as_os_str().is_empty())
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| RELEASE_EXECUTABLE_STEMS.contains(&name))
 }
 
 fn safe_archive_path(value: &str) -> Result<PathBuf, OpenMohaaError> {
@@ -474,6 +707,17 @@ fn apply_staged_files(
                 source: source_error,
             }
         })?;
+        #[cfg(unix)]
+        if entry.executable {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(replacement.path(), fs::Permissions::from_mode(0o755)).map_err(
+                |source| OpenMohaaError::Filesystem {
+                    path: target.clone(),
+                    source,
+                },
+            )?;
+        }
         replacement
             .flush()
             .map_err(|source| OpenMohaaError::Filesystem {
@@ -536,6 +780,7 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[derive(Deserialize)]
 struct RawRelease {
     tag_name: String,
+    name: Option<String>,
     assets: Vec<RawAsset>,
 }
 
@@ -559,7 +804,11 @@ pub enum OpenMohaaError {
     #[error("malformed GitHub release response")]
     MalformedRelease(#[source] serde_json::Error),
     #[error("release has no portable asset for {0:?}")]
-    MissingAsset(ReleaseTarget),
+    MissingAsset(ReleaseSelector),
+    #[error("release has more than one portable asset for {0:?}")]
+    AmbiguousAsset(ReleaseSelector),
+    #[error("rolling dev release has no commit-bearing release name")]
+    MissingDevIdentity,
     #[error("release asset {0:?} has no publisher digest")]
     MissingDigest(String),
     #[error("unsupported published digest {0:?}")]
@@ -568,6 +817,8 @@ pub enum OpenMohaaError {
     InvalidDigest(String),
     #[error("release asset is {size} bytes; maximum is {maximum}")]
     AssetTooLarge { size: u64, maximum: u64 },
+    #[error("OpenMoHAA download was cancelled")]
+    DownloadCancelled,
     #[error("release size differs: expected {expected}, downloaded {actual}")]
     SizeMismatch { expected: u64, actual: u64 },
     #[error("release digest differs: expected {expected}, downloaded {actual}")]
@@ -601,23 +852,76 @@ pub enum OpenMohaaError {
 mod tests {
     use std::fs::{self, File};
     use std::io::{Cursor, Write};
+    use std::path::Path;
 
     use tempfile::TempDir;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
 
     use super::{
-        ClientActivity, OpenMohaaError, PublishedSha256, ReleasePackage, ReleaseTarget,
-        UpdateDeferredReason, UpdateOutcome, install_verified_archive, parse_latest_release,
+        ClientActivity, OpenMohaaError, PublishedSha256, ReleaseChannel, ReleasePackage,
+        ReleaseSelector, ReleaseTarget, UpdateDeferredReason, UpdateOutcome,
+        install_verified_archive, parse_latest_release, parse_release,
     };
 
     #[test]
-    fn selects_exact_portable_asset_and_requires_github_digest() {
+    fn every_stable_target_selects_its_exact_portable_asset() {
+        let fixture = include_str!("../../tests/fixtures/openmohaa_latest_release.json");
+        let expected = [
+            (
+                ReleaseTarget::LinuxAmd64,
+                "openmohaa-v0.82.1-linux-amd64.zip",
+            ),
+            (
+                ReleaseTarget::LinuxArm64,
+                "openmohaa-v0.82.1-linux-arm64.zip",
+            ),
+            (
+                ReleaseTarget::LinuxArmhf,
+                "openmohaa-v0.82.1-linux-armhf.zip",
+            ),
+            (ReleaseTarget::LinuxI686, "openmohaa-v0.82.1-linux-i686.zip"),
+            (
+                ReleaseTarget::MacosArm64,
+                "openmohaa-v0.82.1-macos-multiarch-arm64-x86_64.zip",
+            ),
+            (
+                ReleaseTarget::MacosX64,
+                "openmohaa-v0.82.1-macos-multiarch-arm64-x86_64.zip",
+            ),
+            (
+                ReleaseTarget::WindowsX64,
+                "openmohaa-v0.82.1-windows-x64.zip",
+            ),
+            (
+                ReleaseTarget::WindowsX86,
+                "openmohaa-v0.82.1-windows-x86.zip",
+            ),
+            (
+                ReleaseTarget::WindowsArm64,
+                "openmohaa-v0.82.1-windows-arm64.zip",
+            ),
+        ];
+
+        for (target, asset_name) in expected {
+            let package = parse_latest_release(fixture, target).expect("stable release package");
+            assert_eq!(package.channel, ReleaseChannel::Stable);
+            assert_eq!(package.version, "v0.82.1");
+            assert_eq!(package.asset_name, asset_name);
+            assert!(!package.asset_name.ends_with("-pdb.zip"));
+            assert!(
+                !Path::new(&package.asset_name)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("msi"))
+            );
+        }
+    }
+
+    #[test]
+    fn exact_selector_requires_one_digest_bearing_asset() {
         let fixture = include_str!("../../tests/fixtures/openmohaa_latest_release.json");
         let package =
             parse_latest_release(fixture, ReleaseTarget::WindowsX64).expect("x64 release package");
-        assert_eq!(package.version, "v0.82.1");
-        assert_eq!(package.asset_name, "openmohaa-v0.82.1-windows-x64.zip");
         assert_eq!(
             package.digest.to_hex(),
             "dba183f9c666928b3925e6fdd1f2a780517ef283170d14d55b7650607ca7bb6d"
@@ -631,6 +935,78 @@ mod tests {
             parse_latest_release(&without_digest, ReleaseTarget::WindowsX64),
             Err(OpenMohaaError::MissingDigest(_))
         ));
+
+        let ambiguous = fixture.replace(
+            "\"assets\": [",
+            "\"assets\": [{\"name\":\"duplicate-windows-x64.zip\",\"browser_download_url\":\"https://example.invalid/duplicate.zip\",\"size\":1,\"digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\"},",
+        );
+        assert!(matches!(
+            parse_latest_release(&ambiguous, ReleaseTarget::WindowsX64),
+            Err(OpenMohaaError::AmbiguousAsset(_))
+        ));
+    }
+
+    #[test]
+    fn host_resolution_records_unsupported_pairs_without_guessing() {
+        let supported = [
+            ("linux", "x86_64", ReleaseTarget::LinuxAmd64),
+            ("linux", "aarch64", ReleaseTarget::LinuxArm64),
+            ("linux", "arm", ReleaseTarget::LinuxArmhf),
+            ("linux", "x86", ReleaseTarget::LinuxI686),
+            ("macos", "aarch64", ReleaseTarget::MacosArm64),
+            ("macos", "x86_64", ReleaseTarget::MacosX64),
+            ("windows", "x86_64", ReleaseTarget::WindowsX64),
+            ("windows", "x86", ReleaseTarget::WindowsX86),
+            ("windows", "aarch64", ReleaseTarget::WindowsArm64),
+        ];
+        for (os, architecture, target) in supported {
+            assert_eq!(ReleaseTarget::for_platform(os, architecture), Ok(target));
+        }
+
+        let unsupported = ReleaseTarget::for_platform("linux", "powerpc")
+            .expect_err("PowerPC is deliberately unsupported");
+        assert_eq!(unsupported.os, "linux");
+        assert_eq!(unsupported.architecture, "powerpc");
+    }
+
+    #[test]
+    fn dev_selector_uses_its_own_endpoint_shape_and_release_identity() {
+        let fixture = r#"{
+            "tag_name":"dev",
+            "name":"main-a2f34019",
+            "assets":[{
+                "name":"openmohaa-dev-windows-x64-pdb.zip",
+                "browser_download_url":"https://example.invalid/dev.zip",
+                "size":42,
+                "digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        }"#;
+        let package = parse_release(fixture, ReleaseSelector::dev(ReleaseTarget::WindowsX64))
+            .expect("dev release package");
+        assert_eq!(package.channel, ReleaseChannel::Dev);
+        assert_eq!(package.version, "main-a2f34019");
+        assert_eq!(package.asset_name, "openmohaa-dev-windows-x64-pdb.zip");
+    }
+
+    #[test]
+    fn unix_executable_allowlist_is_narrow_and_archive_root_only() {
+        for name in [
+            "openmohaa",
+            "omohaaded",
+            "launch_openmohaa_base",
+            "launch_openmohaa_spearhead",
+            "launch_openmohaa_breakthrough",
+        ] {
+            assert!(super::is_known_unix_executable(Path::new(name)));
+        }
+        for name in [
+            "game.so",
+            "cgame.dylib",
+            "nested/openmohaa",
+            "openmohaa.exe",
+        ] {
+            assert!(!super::is_known_unix_executable(Path::new(name)));
+        }
     }
 
     #[test]
@@ -722,11 +1098,59 @@ mod tests {
 
     fn package(bytes: &[u8]) -> ReleasePackage {
         ReleasePackage {
+            channel: ReleaseChannel::Stable,
             version: "fixture".to_owned(),
             asset_name: "openmohaa-fixture-windows-x64.zip".to_owned(),
             download_url: "https://example.invalid/openmohaa.zip".to_owned(),
             size: bytes.len() as u64,
             digest: PublishedSha256::from_bytes(bytes),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicitly_marks_only_known_flat_unix_binaries_executable() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let temporary = TempDir::new().expect("temporary directory");
+        let destination = temporary.path().join("profile");
+        let bytes = archive(&[
+            ("openmohaa", b"client"),
+            ("omohaaded", b"server"),
+            ("launch_openmohaa_base", b"launcher"),
+            ("launch_openmohaa_spearhead", b"launcher"),
+            ("launch_openmohaa_breakthrough", b"launcher"),
+            ("game.so", b"library"),
+            ("nested/openmohaa", b"unexpected nested client"),
+        ]);
+
+        install_verified_archive(
+            &package(&bytes),
+            &bytes,
+            &destination,
+            ClientActivity::Unknown,
+        )
+        .expect("Unix overlay install");
+
+        for name in [
+            "openmohaa",
+            "omohaaded",
+            "launch_openmohaa_base",
+            "launch_openmohaa_spearhead",
+            "launch_openmohaa_breakthrough",
+        ] {
+            let mode = fs::metadata(destination.join(name))
+                .expect("known executable metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "{name} was not executable");
+        }
+        for name in ["game.so", "nested/openmohaa"] {
+            let mode = fs::metadata(destination.join(name))
+                .expect("non-executable metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0, "{name} was unexpectedly executable");
         }
     }
 

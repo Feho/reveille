@@ -84,6 +84,15 @@ not a reason to discard the other 112.
 `records_missing_and_malformed_hostports_as_non_results`.
 **Deliberate exception** C2.
 
+### H10 · Never recommend replacing an installed engine without version evidence
+**Because** Finding `openmohaa.exe` proves presence, not age. Treating every present executable as
+outdated turns a successful install into a permanent update prompt.
+**Enforced at** `reveille-app/src/main.rs` validates an app-written release receipt against the
+installed client file before calling that exact release current. The setup view distinguishes
+current / another known build / unknown build / absent; only another known build is offered a
+switch, and reinstalling a current build is secondary. Test:
+`a_receipt_only_identifies_the_unchanged_client_and_exact_release`.
+
 ---
 
 ## S — Safety: what Reveille may do to a machine or a server
@@ -95,15 +104,17 @@ Actually predicting a rejection needs a real `connect`, which on success creates
 someone else's server. That is a join, not a probe.
 **Enforced at** Preflight uses `getstatus` only.
 
-### S2 · Never overwrite a client that is running
-**Because** Replacing a live binary corrupts an installation, and on Windows fails part-way
-through.
+### S2 · Never overwrite release files while one of their programs is running
+**Because** Replacing files used by a live game, dedicated server or launcher corrupts an
+installation, and on Windows fails part-way through.
 **Enforced at** `platform/openmohaa.rs` — `ClientActivity` must be `ConfirmedStopped` before any
 replacement; anything else returns `UpdateOutcome::Deferred`. The activity probe is a closure run
-**after** the download, not before, so a client started mid-transfer is still seen. Test:
+**after** the download, not before, so a program started mid-transfer is still seen. Test:
 `installs_then_refuses_to_overwrite_while_running_or_unknown`.
 **Scope** The probe covers every executable a release archive replaces, not only `openmohaa.exe`
-— a running dedicated server holds the same files.
+— a running dedicated server holds the same files. The platform result also records whether the
+observed process was the game, dedicated server or launcher, so interface copy names only what the
+process list established.
 
 ### S3 · Never raise a UAC prompt mid-journey
 **Because** The ten-minute criterion cannot absorb one, and a player who declines is stranded.

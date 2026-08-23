@@ -15,7 +15,68 @@ use std::process::Command;
 
 use reveille_core::discovery::TargetGame;
 use reveille_core::join::{LaunchCommand, LaunchDialect};
+use reveille_core::platform::openmohaa::{self, ClientActivity};
 use thiserror::Error;
+
+/// One kind of `OpenMoHAA` program whose files a release replaces.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OpenMohaaProgram {
+    /// The playable game client.
+    Game,
+    /// The dedicated server.
+    DedicatedServer,
+    /// One of the expansion launch helpers.
+    Launcher,
+}
+
+/// Process-list evidence about programs whose files an `OpenMoHAA` release replaces.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenMohaaActivity {
+    checked: bool,
+    running: Vec<OpenMohaaProgram>,
+}
+
+impl OpenMohaaActivity {
+    /// Conservative core state used by the transactional replacement gate.
+    #[must_use]
+    pub fn client_activity(&self) -> ClientActivity {
+        if !self.checked {
+            ClientActivity::Unknown
+        } else if self.running.is_empty() {
+            ClientActivity::ConfirmedStopped
+        } else {
+            ClientActivity::Running
+        }
+    }
+
+    /// Exact program kinds observed in the process list.
+    #[must_use]
+    pub fn running_programs(&self) -> &[OpenMohaaProgram] {
+        &self.running
+    }
+
+    /// No trustworthy process-list result was available.
+    #[must_use]
+    pub const fn unknown() -> Self {
+        Self {
+            checked: false,
+            running: Vec::new(),
+        }
+    }
+
+    const fn checked() -> Self {
+        Self {
+            checked: true,
+            running: Vec::new(),
+        }
+    }
+
+    fn observe(&mut self, program: OpenMohaaProgram) {
+        if !self.running.contains(&program) {
+            self.running.push(program);
+        }
+    }
+}
 
 /// Client implementation selected for launch and content-path policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,6 +106,74 @@ pub fn detect_client(install_root: &Path) -> ClientKind {
     } else {
         ClientKind::Retail
     }
+}
+
+/// Conservatively report whether a Windows `OpenMoHAA` installation can be replaced.
+///
+/// A failed or unavailable process query is `Unknown`, never evidence that the client stopped.
+#[must_use]
+pub fn openmohaa_activity() -> OpenMohaaActivity {
+    #[cfg(windows)]
+    {
+        // Microsoft tasklist documentation: learn.microsoft.com/windows-server/administration/
+        // windows-commands/tasklist. One unfiltered CSV listing is used rather than an
+        // `IMAGENAME eq` filter per name, because `/FI` filters combine with AND and cannot
+        // express "any of these images". Matching on image name alone is deliberately
+        // conservative: tasklist cannot prove which installation launched a process.
+        let Ok(output) = Command::new("tasklist")
+            .args(["/FO", "CSV", "/NH"])
+            .output()
+        else {
+            return OpenMohaaActivity::unknown();
+        };
+        if !output.status.success() {
+            return OpenMohaaActivity::unknown();
+        }
+        tasklist_release_activity(&String::from_utf8_lossy(&output.stdout))
+    }
+    #[cfg(not(windows))]
+    {
+        OpenMohaaActivity::unknown()
+    }
+}
+
+/// Does any listed process hold one of the executables a release archive overwrites?
+///
+/// The client is not the only lock: an archive also replaces `omohaaded.exe` and the three
+/// `launch_openmohaa_*.exe` shims, and a running dedicated server locks `game.dll` just as a
+/// running client does. Naming only `openmohaa.exe` would report `ConfirmedStopped` and then
+/// fail part-way through the apply on a sharing violation.
+#[cfg(any(windows, test))]
+fn tasklist_release_activity(output: &str) -> OpenMohaaActivity {
+    let mut activity = OpenMohaaActivity::checked();
+    // `tasklist_image_name` lowercases, so this also matches a row spelled `OMohAADed.EXE`.
+    for stem in output
+        .lines()
+        .filter_map(tasklist_image_name)
+        .filter_map(|image| image.strip_suffix(".exe").map(str::to_owned))
+        .filter(|stem| openmohaa::RELEASE_EXECUTABLE_STEMS.contains(&stem.as_str()))
+    {
+        match stem.as_str() {
+            "openmohaa" => activity.observe(OpenMohaaProgram::Game),
+            "omohaaded" => activity.observe(OpenMohaaProgram::DedicatedServer),
+            "launch_openmohaa_base"
+            | "launch_openmohaa_spearhead"
+            | "launch_openmohaa_breakthrough" => activity.observe(OpenMohaaProgram::Launcher),
+            _ => {}
+        }
+    }
+    activity
+}
+
+/// Read the quoted image name from one `tasklist /FO CSV /NH` row, lowercased.
+///
+/// A row that is not a quoted CSV record — a localised "no tasks are running" notice, or a
+/// blank line — yields nothing rather than a spurious match.
+#[cfg(any(windows, test))]
+fn tasklist_image_name(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix('"')?;
+    let (image, after) = rest.split_once('"')?;
+    after.starts_with(',').then(|| image.to_ascii_lowercase())
 }
 
 /// Derive the product-specific executable within one identified installation.
@@ -200,6 +329,54 @@ mod tests {
 
         fs::write(temporary.path().join("openmohaa.exe"), []).expect("client marker");
         assert_eq!(detect_client(temporary.path()), ClientKind::OpenMohaa);
+    }
+
+    #[test]
+    fn tasklist_parser_is_exact_and_ignores_a_localised_empty_result() {
+        for stem in openmohaa::RELEASE_EXECUTABLE_STEMS {
+            let row = format!("\"{stem}.exe\",\"8120\",\"Console\",\"1\",\"42,000 K\"");
+            assert!(
+                tasklist_release_activity(&row).client_activity() == ClientActivity::Running,
+                "{stem}.exe holds a lock on the installation"
+            );
+        }
+        let mixed = tasklist_release_activity(
+            "\"explorer.exe\",\"1\",\"Console\",\"1\",\"1 K\"
+\"OMohAADed.EXE\",\"2\",\"Console\",\"1\",\"1 K\"",
+        );
+        assert_eq!(
+            mixed.running_programs(),
+            &[OpenMohaaProgram::DedicatedServer]
+        );
+        for output in [
+            "Information : aucune tâche en cours ne correspond aux critères spécifiés.",
+            "\"not-openmohaa.exe\",\"8120\",\"Console\",\"1\",\"42,000 K\"",
+            "\"openmohaa.exe.bak\",\"8120\",\"Console\",\"1\",\"42,000 K\"",
+            "\"openmohaa.exe\"",
+        ] {
+            assert_eq!(
+                tasklist_release_activity(output).client_activity(),
+                ClientActivity::ConfirmedStopped
+            );
+        }
+    }
+
+    #[test]
+    fn tasklist_activity_preserves_which_programs_were_observed() {
+        let activity = tasklist_release_activity(
+            "\"openmohaa.exe\",\"1\",\"Console\",\"1\",\"1 K\"\n\
+             \"omohaaded.exe\",\"2\",\"Console\",\"1\",\"1 K\"\n\
+             \"launch_openmohaa_base.exe\",\"3\",\"Console\",\"1\",\"1 K\"",
+        );
+        assert_eq!(
+            activity.running_programs(),
+            &[
+                OpenMohaaProgram::Game,
+                OpenMohaaProgram::DedicatedServer,
+                OpenMohaaProgram::Launcher
+            ]
+        );
+        assert_eq!(activity.client_activity(), ClientActivity::Running);
     }
 
     #[test]

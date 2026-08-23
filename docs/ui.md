@@ -99,11 +99,16 @@ There is **one** primary surface. The three-screen wizard was removed.
 
 - **Setup** (`views/setup.js`) — shown *only* while no install is resolved. Not a welcome page: it
   answers "where is the game" and says how confidently, distinguishing a verified binary hash from
-  a name-only match. It also checks the host's latest stable OpenMoHAA archive and offers an
-  install or explicit replacement beside the user's retail assets. Reachable again by clicking the
-  install chip in the titlebar; the chip's tooltip names both the game folder and OpenMoHAA. An
-  existing engine is detected by client-binary presence, but its release version is not inferred;
-  the replacement copy says so before naming the stable build it will write.
+  a name-only match. It checks OpenMoHAA's recommended release and offers an install or explicit
+  replacement beside the user's retail assets. A player may instead opt into the newest preview
+  build, which the interface identifies as less tested. Reachable again by clicking the install
+  chip in the titlebar; the chip's tooltip names both the game folder and OpenMoHAA. An existing
+  engine is detected by client-binary presence. When Reveille installed it, a receipt bound to the
+  client file identifies the exact release; an unchanged matching release says **Up to date** and
+  offers reinstall only as a secondary action. A changed or externally installed executable says
+  **Version unknown**, never outdated. Selecting a different known release offers an explicit
+  switch. Refresh re-identifies the game folder as well as the selected release, and installation
+  uses that displayed release rather than performing a second release lookup.
 - **Servers** (`views/servers.js`) — where the session lives.
 - **Detail pane** (`views/join.js`) — selection previews the join *in place*. No
   browser → join → back navigation; servers stay comparable; the list never disappears.
@@ -129,6 +134,7 @@ Change a rule in the register first, then update the right-hand column here.
 | **C3** · Never auto-apply an ambiguous match | Choice radios start with **nothing selected**. The total excludes unresolved maps and the pane says how many still need a choice. |
 | **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\moh\main` path, not a euphemism. |
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
+| **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. |
 
 ## 5. The join gate
 
@@ -236,11 +242,13 @@ platform v1 supports.
 - Every long operation is cancellable: the sweep has a **Stop**, selecting another server
   abandons the in-flight catalogue lookup, and the OpenMoHAA download has **Stop download**. Engine
   cancellation is checked between response chunks and never interrupts the atomic apply phase.
-- Whether the client is running is probed **after** the archive has downloaded, not before. The
+- Whether a release-owned program is running is probed **after** the archive has downloaded, not
+  before. The
   transfer is long enough for a player to start the game inside it, and a stale reading turns an
-  honest "Close OpenMoHAA and try again" into a locked-file error part-way through the apply. The
+  honest request to close that program into a locked-file error part-way through the apply. The
   probe covers every executable a release archive replaces, not only `openmohaa.exe` — a running
-  dedicated server holds the same files.
+  dedicated server holds the same files. Copy distinguishes the game, server and launcher from the
+  process name; it does not call a dedicated server the game.
 
 ### Re-rendering must not steal the caret
 

@@ -1,11 +1,85 @@
 {
   "tag_name": "v0.82.1",
+  "name": "v0.82.1-beta",
+  "prerelease": false,
   "assets": [
     {
+      "name": "openmohaa-v0.82.1-linux-amd64.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-linux-amd64.zip",
+      "size": 16999314,
+      "digest": "sha256:57692d057a684afb7f7e91a61fcd8c062b29ab1b639f27453830084a88cd653c"
+    },
+    {
+      "name": "openmohaa-v0.82.1-linux-arm64.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-linux-arm64.zip",
+      "size": 16582558,
+      "digest": "sha256:7963c0e493ffff3169f42a63ec5c15382e263605e9e60abc73c82716678fb180"
+    },
+    {
+      "name": "openmohaa-v0.82.1-linux-armhf.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-linux-armhf.zip",
+      "size": 16355364,
+      "digest": "sha256:4f31a9651086e8dc6c8a82f3e29c6126b56240f900d05d9c5abd28f25b8c78c1"
+    },
+    {
+      "name": "openmohaa-v0.82.1-linux-i686.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-linux-i686.zip",
+      "size": 16563248,
+      "digest": "sha256:44a868633f7b11e85873a963dc8da2a2f0043707237a94e7a00f9a4066af40a4"
+    },
+    {
+      "name": "openmohaa-v0.82.1-linux-powerpc.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-linux-powerpc.zip",
+      "size": 17250820,
+      "digest": "sha256:711acd18cfb169e69409e697f2f48006d31b5b4f87bf2f065a2499f8145cf088"
+    },
+    {
+      "name": "openmohaa-v0.82.1-linux-ppc64.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-linux-ppc64.zip",
+      "size": 18040277,
+      "digest": "sha256:740e4953a8fbe88ba7d2d88810f5d01afb6702f0d400a044f7f4a84fe83d1c46"
+    },
+    {
+      "name": "openmohaa-v0.82.1-linux-ppc64el.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-linux-ppc64el.zip",
+      "size": 17438588,
+      "digest": "sha256:5c5ccafd87d17fc4b337bd55f9842017fcb96918e8afada3c8e8e12a3351d207"
+    },
+    {
+      "name": "openmohaa-v0.82.1-macos-multiarch-arm64-x86_64.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-macos-multiarch-arm64-x86_64.zip",
+      "size": 10588420,
+      "digest": "sha256:dd590e887078912e0bd80ad3e9d414ef7611faada064e7e49b4c3eafa59e579a"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-arm64-pdb.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-arm64-pdb.zip",
+      "size": 16957637,
+      "digest": "sha256:7ba48b85edcb1582d8508b6f6c40e43e51cdd42f1a6a2da1e2fabe8025493803"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-arm64.msi",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-arm64.msi",
+      "size": 7438336,
+      "digest": "sha256:b601dfa784920aabfcb91dd59f33ce6d3539a60be8458296e2fa5da97598b6d4"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-arm64.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-arm64.zip",
+      "size": 4941693,
+      "digest": "sha256:22c6c17b29b6daa1d6ee316a5249f113fc65d164812ee2a2ca36b9f8b57ec71b"
+    },
+    {
       "name": "openmohaa-v0.82.1-windows-x64-pdb.zip",
-      "browser_download_url": "https://example.invalid/openmohaa-pdb.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-x64-pdb.zip",
       "size": 17599289,
       "digest": "sha256:88a7c61df819284eaf6ba348964d7aa21f46835e311b88f9142232bfc8f10d24"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-x64.msi",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-x64.msi",
+      "size": 7733248,
+      "digest": "sha256:1296471b5fdca5059704ff410165c9234ff8679f4ef079194b7b8c9ac89f2fee"
     },
     {
       "name": "openmohaa-v0.82.1-windows-x64.zip",
@@ -14,10 +88,22 @@
       "digest": "sha256:dba183f9c666928b3925e6fdd1f2a780517ef283170d14d55b7650607ca7bb6d"
     },
     {
-      "name": "openmohaa-v0.82.1-windows-arm64.zip",
-      "browser_download_url": "https://example.invalid/openmohaa-arm64.zip",
-      "size": 4941693,
-      "digest": "sha256:22c6c17b29b6daa1d6ee316a5249f113fc65d164812ee2a2ca36b9f8b57ec71b"
+      "name": "openmohaa-v0.82.1-windows-x86-pdb.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-x86-pdb.zip",
+      "size": 17090133,
+      "digest": "sha256:88254acd4494faab911d0dd25a6bbd0e73a44c1b5177cc0e4fd1dd060a4a3e2e"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-x86.msi",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-x86.msi",
+      "size": 6561792,
+      "digest": "sha256:407b45330ebe4d53d3d3d858e29704be61a226570b1491b3238ac80cb48bebe3"
+    },
+    {
+      "name": "openmohaa-v0.82.1-windows-x86.zip",
+      "browser_download_url": "https://github.com/openmoh/openmohaa/releases/download/v0.82.1/openmohaa-v0.82.1-windows-x86.zip",
+      "size": 4657170,
+      "digest": "sha256:39c3c146e477b1ffaf99c6040f791be7a393af304e2efadbcaa7ab20ed5d7541"
     }
   ]
 }

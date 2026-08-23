@@ -657,6 +657,31 @@
   flex: 1;
 }
 
+.engine-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+
+.engine-choice__label {
+  white-space: nowrap;
+}
+
+.engine-choice select {
+  min-width: 0;
+  padding: 7px 28px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--rise);
+}
+
+.engine-choice select:disabled {
+  color: var(--faint);
+}
+
 /* Narrow windows. The minimum is 920x620, so this only has to survive the
    detail pane becoming untenable, not a phone. */
 @media (max-width: 1080px) {
