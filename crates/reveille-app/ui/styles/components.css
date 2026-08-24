@@ -161,6 +161,82 @@
   color: var(--brass-ink);
 }
 
+/* Scope switch --------------------------------------------------------------
+   Three exclusive buttons over one table, not tabs over three panels. Chrome only:
+   the whole control is outside the data plane, so it carries the brass. */
+
+.scope {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--void);
+}
+
+.scope__option {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--dim);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.scope__option:hover {
+  color: var(--ink);
+}
+
+.scope__option[aria-pressed="true"] {
+  background: var(--rise);
+  color: var(--ink);
+}
+
+.scope__count {
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+
+.scope__count:empty {
+  display: none;
+}
+
+/* The star ------------------------------------------------------------------
+   A control, not a status: brass when set, decoration grey when not. It never
+   colours anything the player reads to make a decision. */
+
+.star {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--faint-deco);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.star:hover {
+  color: var(--brass);
+}
+
+.star[aria-pressed="true"] {
+  color: var(--brass);
+}
+
+.star--lg {
+  width: 32px;
+  height: 32px;
+  font-size: 22px;
+}
+
 /* Chips -------------------------------------------------------------------- */
 
 .chip {

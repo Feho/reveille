@@ -814,6 +814,20 @@ None of this blocks v1. It is written down so that v1 does not accidentally fore
 particular, do not let the reactive path bake in an assumption that content only ever arrives
 because a server asked for it.
 
+**Favourites and launch history are not the v2 catalogue, and must not become its foundation.**
+Added 24 Aug 2026. What they store is deliberately the smallest thing that works: an address, the
+master's query port, and the name the server had when it was saved. No content state, no installed
+state, no compatibility verdict — those are facts about a moment, and re-deriving them is exactly
+what the sweep and the disk walk already do. The v2 bullet above needs *installed-state tracking*;
+this is not the start of it, and extending `bookmarks.js` in that direction would put a store of
+remembered facts in the one place the interface is least able to check them (rule **H12**).
+
+Two things did come out of it that v2 can build on. `discovery::inspect_endpoint` probes one
+already-known registration without a master query, which makes a server reachable that the master
+never listed — the master's list has never been the population, and until now Reveille could not
+join anything outside it. And `check_server` merges its result into the same server list the sweep
+fills, so nothing downstream of it needed to learn about a second source of servers.
+
 ## Decisions still open
 
 Maintainer model. The moh-db relationship: worth telling them, and worth asking for published

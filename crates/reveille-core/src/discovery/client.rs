@@ -225,6 +225,19 @@ fn record_duplicate_game_endpoints(outcomes: &mut [ProbeOutcome]) {
     }
 }
 
+/// Inspect one already-known registration, without asking the master for a list.
+///
+/// This is exactly the probe [`browse`] runs per endpoint, at the caller's deadline, so a server
+/// that answers here answered the same question as every server in a sweep. That matters: a
+/// remembered server checked on gentler terms than the list would be listed on terms the list
+/// never offered.
+///
+/// A failure is carried in the outcome's `non_result` rather than returned as an error — one
+/// endpoint failing is information about that endpoint.
+pub async fn inspect_endpoint(endpoint: MasterEndpoint, deadline: Duration) -> ProbeOutcome {
+    probe_server(endpoint, deadline).await
+}
+
 /// Send MOHAA `getstatus` with the required five-byte directional header.
 ///
 /// # Errors

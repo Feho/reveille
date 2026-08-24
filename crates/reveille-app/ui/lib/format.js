@@ -116,59 +116,6 @@ export function mapName(value) {
   return name === "" ? "(unnamed)" : name;
 }
 
-/**
- * What the Needs column says for one server.
- *
- * This is the cost-not-verdict rule in one function. A ready server contributes
- * nothing to the column; extra content is priced, not flagged; an unpublished
- * rotation is reported as a fact about the server. Only the state a download
- * cannot fix is coloured.
- *
- * A server that published no rotation is still running something, and if that map
- * is missing it costs one download — worth pricing, because it is the difference
- * between joining and being dropped on arrival. The tooltip says the rest of the
- * rotation remains unknown, so the figure is never read as complete.
- */
-export function needsCell(assessment) {
-  const state = assessment?.state;
-  if (
-    state?.state !== "compatible" &&
-    state?.state !== "needs_maps" &&
-    state?.state !== "no_source" &&
-    assessment?.current_map?.readiness === "missing"
-  ) {
-    return {
-      text: "+ 1 map",
-      kind: "cost",
-      title:
-        "This server publishes no rotation, but the map it is running now is not on disk. Reveille can fetch that one; what comes after it is unknown.",
-    };
-  }
-  switch (state?.state) {
-    case "compatible":
-      return null;
-    case "needs_maps":
-      return {
-        text: `+ ${plural(state.count, "map")}`,
-        kind: "cost",
-        title: `This server's rotation uses ${plural(state.count, "map")} you do not have. Reveille can fetch ${state.count === 1 ? "it" : "them"} before you join.`,
-      };
-    case "no_source":
-      return {
-        text: `${plural(state.count, "map")} unavailable`,
-        kind: "blocked",
-        title: `${plural(state.count, "map")} in this rotation ${state.count === 1 ? "is" : "are"} not in any catalogue Reveille can reach. You can still play until the rotation reaches ${state.count === 1 ? "it" : "them"}.`,
-      };
-    default:
-      return {
-        text: "not published",
-        kind: "unknown",
-        title:
-          "This server does not publish its map rotation, so there is nothing to check in advance.",
-      };
-  }
-}
-
 /** The canonical four state names, used wherever the decision is actually made. */
 export function stateName(state) {
   switch (state?.state) {
@@ -205,6 +152,43 @@ export function stateExplanation(state) {
  * failures, and labelling both "did not answer" makes one group look like a
  * duplicate of the other.
  */
+/**
+ * How long ago something happened, for the history line.
+ *
+ * Recent values are relative because that is how a player thinks about "did I play there
+ * today"; anything older than a week becomes a date, because "43 days ago" is arithmetic the
+ * reader has to undo. Returns null for a missing or unreadable timestamp rather than inventing
+ * one.
+ */
+export function timeAgo(iso) {
+  if (!iso) return null;
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return null;
+  const seconds = Math.max(0, (Date.now() - then.getTime()) / 1000);
+  if (seconds < 90) return "just now";
+  const minutes = seconds / 60;
+  if (minutes < 60) return `${Math.round(minutes)} min ago`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  const days = hours / 24;
+  if (days < 7) return `${Math.round(days)}d ago`;
+  return then.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+/**
+ * The launch line: what Reveille did, not what the server did.
+ *
+ * "Launched", never "joined" or "played". Reveille starts the game process and sees that it
+ * started. Whether the server admitted the player is decided at connect time and Reveille never
+ * observes the answer (docs/rules.md H12).
+ */
+export function launchedLabel(entry) {
+  if (!entry?.launches) return null;
+  const when = timeAgo(entry.lastLaunchedAt);
+  const times = entry.launches > 1 ? ` · ${entry.launches}×` : "";
+  return when ? `Launched ${when}${times}` : `Launched ${entry.launches}×`;
+}
+
 export function nonResultReason(group) {
   if (group.reason === "duplicate_endpoint") return "is the same server registered twice";
   if (group.reason === "missing_host_port") return "did not publish a game port";

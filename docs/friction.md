@@ -111,6 +111,29 @@ Sorts on reported human clients only.
 (`plan.md:168-171`). This is a permanent limit, not a to-do. Do not let anyone "fix" it later by
 guessing.
 
+### F9 · No way to get back to a server you liked
+
+**Where** Browse, on the second and every later run.
+**Who it stops** Anyone who has already found a server worth returning to — so, by definition,
+nobody on their first run and potentially everybody after it.
+**Evidence** *Assumed.* Requested by the project owner, 24 Aug 2026. **No player has been observed
+asking for it**, and the two figures that would make it Measured are not collected: how often a
+returning player looks for a specific server, and how often a server they starred is absent from
+a given sweep. The second one is now cheap to measure — the Favourites status bar computes
+"N of M in this check" on every sweep — and is worth capturing before this entry is ranked
+against anything above it.
+**What Reveille does** A star on every row, and two extra list scopes: **Favourites** and
+**History**. A saved server the current sweep did not return is not hidden and not drawn with the
+figures it had last time — it says "not in this check" and offers a **Check** button that runs
+the same probe against that one address, without a master list. That last part is the point: the
+master's list is not the population, and a server missing from it was previously unjoinable in
+Reveille at all.
+**Status** Shipped. Storage is per-machine `localStorage`; there is no sync and no export.
+**What it deliberately does not do** History records that Reveille *launched the game*, not that
+the player got in — admission is the server's decision at connect time and no reply reports it
+(rule **H12**). And a bookmark stores an address, a query port and a name: no client count, no map,
+no round trip, so there is no stale measurement that could be redrawn as current.
+
 ---
 
 ## Stage 3 — Getting in
@@ -125,6 +148,11 @@ guessing.
 **What Reveille does** Prices the download before you commit (`Get 9.1 MB & join`), resolves what
 it can, and lists what it cannot as a recorded non-result rather than failing the pass.
 **Status** Shipped.
+**Narrowed 24 Aug 2026** The **Needs** column was removed from the server list at the owner's
+request, so the price is now visible only after a server is selected. The join itself is unchanged
+— the button still names the cost, and the gate still runs. What was lost is comparison: a player
+scanning the list can no longer see which rows cost a download without clicking each one. If this
+turns out to matter, the column is the fix, and `docs/ui.md` §2.1 keeps what it rendered.
 
 ### F7 · The server publishes no rotation, so nothing can be promised
 

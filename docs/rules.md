@@ -107,6 +107,22 @@ in-game ping." Test:
 **Never** synthesise a value. A server that produced no reply is not listed at all, so there is
 no unknown case to fill in.
 
+### H12 · Never present a remembered server's facts as current, and never call a launch a join
+**Because** Two different claims, one cause. A bookmark is written during one check and read
+during another: the client count, map and round trip it saw were true of a moment that has
+passed, and drawn in the live table they would read as now. And Reveille observes that it
+*started the game* — admission is decided at connect time by bans, capacity, a password and the
+ping gate (S1), and no reply ever tells Reveille the answer.
+**Enforced at** `ui/lib/bookmarks.js` stores an address, a query port and a name and **nothing
+else**, so there is no measurement to render as current; a remembered server the current check did
+not return is drawn by `absentRow` in `ui/views/servers.js` with its name marked *remembered* and
+the words "not in this check", never "offline" and never with figures. History is written only
+from `LaunchOutcome::Launched` (`ui/app.js`), never from a refusal, and every label reads
+"Launched". No test — this is a storage-shape and copy rule; `copy-review` is the check.
+**Not "offline"** A server missing from the sweep was usually never asked: the master returned a
+list and only that list was probed. Only a check that actually ran and failed may say the server
+did not answer, and it carries the recorded reason.
+
 ---
 
 ## S — Safety: what Reveille may do to a machine or a server
@@ -215,6 +231,10 @@ carries them so the question does not get re-opened from scratch.
 
 ## Known gaps
 
-H5, H7, C3, E1 and E2 have **no mechanical guard**. They hold only as long as someone is
-looking. H5 is partly covered by the `copy-review` agent; the others are not covered at all, and
-that is worth knowing before trusting this list as a safety net.
+H5, H7, H12, C3, E1 and E2 have **no mechanical guard**. They hold only as long as someone is
+looking. H5 and H12 are partly covered by the `copy-review` agent; the others are not covered at
+all, and that is worth knowing before trusting this list as a safety net.
+
+H12's storage half is stronger than its copy half: `bookmarks.js` never persists a measurement,
+so the stale figure a reviewer would look for does not exist to be rendered. What is unguarded is
+the wording — "not in this check" versus "offline", "Launched" versus "Joined".

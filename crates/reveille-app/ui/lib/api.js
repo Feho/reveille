@@ -15,6 +15,7 @@
 //   install_reborn(path)                       -> RebornInstallResult
 //   browse_servers(path, engine)               -> BrowserPayload
 //   cancel_browse()                            -> void
+//   check_server(path, address, queryPort, engine) -> CheckResult
 //   preview_join(path, address, engine)         -> JoinPreview
 //   install_and_launch(path, address, engine, selectedCandidateIds, acceptIncomplete) -> JoinResult
 //
@@ -49,6 +50,13 @@ export const pickInstallFolder = () => invoke("pick_install_folder");
 export const browseServers = (path, engine) => invoke("browse_servers", { path, engine });
 
 export const cancelBrowse = () => invoke("cancel_browse");
+
+/**
+ * Probe one remembered server directly. Resolves either way: a server that did not answer comes
+ * back as `{ row: null, non_result }`, never as a rejection.
+ */
+export const checkServer = (path, address, queryPort, engine) =>
+  invoke("check_server", { path, address, queryPort, engine });
 
 export const previewJoin = (path, address, engine) => invoke("preview_join", { path, address, engine });
 

@@ -40,9 +40,25 @@ roughly a quarter of the live population and specifically away from servers with
 rotations — reproducing, inside Reveille, the exact "the game is dead" impression Reveille was built
 to correct.
 
-So the **Needs** column states a price instead of passing a judgement:
+So the list states **no compatibility verdict at all**. It carries the facts a server reports —
+name, clients, map, ping, build — and nothing that grades it.
 
-| State | Cell | Colour |
+**The Needs column was removed on 24 Aug 2026**, by the project owner. It had priced the work in
+the list itself (`+ 7 maps`, `7 maps unavailable`, `not published`), colourless except for the one
+state a download cannot fix. Removing it costs one thing and is worth writing down: the download
+price is now visible **only after a server is selected**, in the detail pane, so a player comparing
+rows cannot see which of them costs a download without clicking each one. That is a real
+regression against F6, and the reason to restore the column if it is ever missed.
+
+What it does **not** cost is honesty. The four state names were never in the column — they live in
+the detail pane under **Join check**, which is where the decision is actually made, and the join
+gate (§5) is unchanged. Rule H3 is satisfied there, not here.
+
+The rejection above still stands with full force: if a verdict ever returns to the list, it must
+return as a **price**, never as a badge, a colour or a tick. The table above records what that
+looked like, so it does not have to be re-derived.
+
+| State | Cell it used to render | Colour |
 |---|---|---|
 | `Compatible` | *empty* | — |
 | `NeedsMaps { count }` | `+ 7 maps` | none (default ink) |
@@ -50,15 +66,9 @@ So the **Needs** column states a price instead of passing a judgement:
 | `CantTell` | `not published` | `--faint`, italic |
 | `CantTell`, current map absent | `+ 1 map` | none (default ink) |
 
-Readiness is the **absence** of work, not an award. A ready server earns a blank cell.
-
-The last row exists because a server that publishes no rotation is still running *something*. If
-that map is not on disk the join is dropped on arrival, and one download fixes it — so it is priced
-like any other work. The cell's `title` says the rest of the rotation remains unknown, so the figure
-is never read as a complete bill.
-
-Every cell carries a `title` with the full explanation, so the short label never has to carry the
-whole meaning.
+The **Hide unavailable maps** toggle survives the removal and now filters on a state the list no
+longer shows. That is deliberate — it is the one case where the work cannot be done at all — but it
+is worth knowing the control is doing something invisible.
 
 **The four canonical state names still exist and are unchanged** — `Compatible`, `Needs N maps`,
 `No source`, `Can't tell`. They appear in the detail pane, under **Join check**, where the decision
@@ -86,12 +96,12 @@ There is **one** primary surface. The three-screen wizard was removed.
 ┌──────────────────────────────────────────────────────────────┐
 │ REVEILLE                              D:\Jeux\EA GAMES\MOHDA │  titlebar
 ├──────────────────────────────────────────────────────────────┤
-│ ⌕ search   ☐ Has people  ☐ Hide unavailable  ▓▓▓░ 78/190 Stop│  toolbar
+│ [All 106│Fav 3│History] ⌕ search  ☐ Has people  ▓▓▓░ 78/190 Stop│ toolbar
 ├───────────────────────────────────────┬──────────────────────┤
-│ SERVER      CLIENTS  MAP NOW  RUNS  NEEDS │  detail pane      │
-│ harzCore      40/64  dm/mohdm6  1.11      │  server facts     │
-│ <[TFC]>        1/32  obj/bluts  1.11  +7 maps │  join check   │
-│ [FORTE]       21/32  dm/mohdm6  1.11  not published │ maps     │
+│ ★ SERVER      CLIENTS  MAP NOW   PING  RUNS │  detail pane    │
+│ ★ harzCore      40/64  dm/mohdm6  21ms  1.11 │  server facts   │
+│ ☆ <[TFC]>        1/32  obj/bluts  38ms  1.11 │  join check     │
+│ ☆ [FORTE]       21/32  dm/mohdm6  14ms  1.11 │  maps           │
 ├───────────────────────────────────────┼──────────────────────┤
 │ 106 of 190 answered · 108 bots · 84 not listed │ [Join]       │  status/actions
 └───────────────────────────────────────┴──────────────────────┘
@@ -106,6 +116,19 @@ There is **one** primary surface. The three-screen wizard was removed.
   while switching keeps both managed engines installed. The titlebar chip names the active engine
   beside the canonical game folder.
 - **Servers** (`views/servers.js`) — where the session lives.
+- **Scope** (`All` · `Favourites` · `History`) — three exclusive buttons at the head of the
+  toolbar. Not tabs: there is still one table, one set of columns and one selection, and only the
+  population it draws from changes. **This is not a compatibility filter** and must never grow
+  into one — see §2.1 on why there is no "only compatible" control. `Favourites` lists what the
+  player starred; `History` lists what Reveille launched the game for, most recent first, which is
+  a sort key no column header owns, so no arrow is drawn in that scope.
+- **A remembered server the current check did not return** stays in the list as an *absent* row:
+  its star, its address, its name marked `remembered name`, the words **not in this check**, and a
+  **Check** button. Nothing else — no client count, no map, no round trip, because those were true
+  of a past moment (rule **H12**). The button runs `check_server`, the same probe the sweep runs at
+  the same deadline; a server that answers becomes an ordinary row and is joinable, and one that
+  does not says **did not answer** with the recorded reason in its `title`. Favourites the sweep
+  missed are checked once automatically per completed sweep, on first entry into that scope.
 - **Detail pane** (`views/join.js`) — selection previews the join *in place*. No
   browser → join → back navigation; servers stay comparable; the list never disappears.
 - Install progress and the launch outcome render inside the detail pane, not as separate screens.
@@ -131,7 +154,8 @@ Change a rule in the register first, then update the right-hand column here.
 | **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\moh\main` path, not a euphemism. |
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
 | **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. |
-| **H11** · Never call the measured round trip the in-game ping | The column is **Ping** because that is the word players look for, but every explanation is the honest one: the tooltip says "Time for one status request to this server and back, measured once during this check. Not the in-game ping." The figure carries no colour, no bars and no bands — it is a measurement to sort by, not a verdict, for the same reason the Needs column has no traffic light. |
+| **H11** · Never call the measured round trip the in-game ping | The column is **Ping** because that is the word players look for, but every explanation is the honest one: the tooltip says "Time for one status request to this server and back, measured once during this check. Not the in-game ping." The figure carries no colour, no bars and no bands — it is a measurement to sort by, not a verdict, for the same reason the list carries no traffic light. |
+| **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favourite says **not in this check** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
 | **S2** · Never change engine files while an affected program is running | Installation and Original/Reborn activation are blocked unless the relevant process query confirms stopped. Unknown is blocking, not permission. |
 | **S5** · Preserve original executables before installing Reborn | Reborn installation retains first-seen originals. Switching changes the active canonical copies and never describes either managed engine as uninstalled. |
 
@@ -231,7 +255,12 @@ platform v1 supports.
 - The server list is a real `<table>` with `<caption>`, `scope="col"` and `aria-sort` — not a grid
   of buttons. Rows are `tabindex="0"` with `aria-selected`.
 - **Keyboard**: `↑`/`↓`/`Home`/`End` move between rows, `Enter` and `Space` activate, `/` focuses
-  search, `Escape` clears it, `F5` or `Ctrl+R` refreshes.
+  search, `Escape` clears it, `F5` or `Ctrl+R` refreshes, `F` stars or unstars the selected server.
+- A row contains buttons — the star, and **Check** on an absent row — so the tbody key handler
+  **returns early when the event target is a button**. Without that it swallows `Enter` and
+  `Space` and the controls work with a mouse and are dead to a keyboard. The cost is that the
+  arrow keys do not move rows while focus is inside one of those buttons, which is the right
+  trade: a control that cannot be activated is worse than one that cannot be escaped by arrow.
 - `:focus-visible` shows a brass ring on every interactive element. Outlines are never removed.
 - A `role="status" aria-live="polite"` region announces sweep progress and state changes.
   `role="alert"` is reserved for genuine errors.
@@ -309,6 +338,11 @@ The rule: **an explanation earns a paragraph only if it changes the next click.*
   "checks that the download arrived intact", not `SHA-256`, digest, GitHub API, asset, or archive.
   Exact filenames and published digests may remain optional tooltip detail for diagnosis.
 
+- Say "Launched", never "Joined" or "Played". Reveille started the game and saw it start; the
+  server decides admission at connect time and never tells Reveille the answer.
+- Say "not in this check" for a saved server the sweep did not return, and "did not answer" only
+  after a check actually ran and failed. The two are different facts: most absences mean the
+  server was never asked.
 - Say "clients", never "players".
 - Say "did not answer", not "offline" — we know the former, not the latter.
 - Say "not published" when a server published nothing. Silence is shown as silence and never

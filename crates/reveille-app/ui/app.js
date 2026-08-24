@@ -8,6 +8,7 @@ import { $, fill } from "./lib/dom.js";
 import {
   browseServers,
   cancelBrowse,
+  checkServer,
   errorText,
   installAndLaunch,
   onBrowseProgress,
@@ -15,6 +16,7 @@ import {
   onPreviewProgress,
   previewJoin,
 } from "./lib/api.js";
+import { favourites, recordLaunch, toggleFavourite } from "./lib/bookmarks.js";
 import { displayPath } from "./lib/format.js";
 import {
   loadFilters,
@@ -41,6 +43,7 @@ const servers = serversView({
   onCancel: stopBrowse,
   onSelect: select,
   onShowNonResults: showNonResults,
+  onCheck: check,
 });
 const join = joinView($("#detail-slot"), { onJoin: getAndJoin });
 const setup = setupView(setupRoot, { onReady: enterServers });
@@ -108,6 +111,9 @@ async function refresh() {
     next.selected = null;
     next.preview = null;
     next.joinResult = null;
+    // What a previous check found described a moment that has just been superseded.
+    next.checks = new Map();
+    next.autoCheckedAt = null;
   });
 
   try {
@@ -216,6 +222,9 @@ async function getAndJoin(row, acceptIncomplete) {
       selectedCandidateIds,
       acceptIncomplete,
     );
+    // Only a launched outcome is remembered. A refusal means Reveille did not start the game,
+    // so there is nothing that happened to record (docs/rules.md H12).
+    if (result.outcome?.launch === "launched") recordLaunch(row);
     update((next) => {
       next.installRun = null;
       next.joinResult = { ...result, address: row.address };
@@ -249,6 +258,80 @@ onInstallProgress((progress) => {
   });
 });
 
+/* Checking one remembered server --------------------------------------------- */
+
+/**
+ * Ask a saved server directly, without a master list.
+ *
+ * A favourite is often not in the sweep — the master never registered it, or it did not answer
+ * in time. Until it is in the list it cannot be selected or joined, so this is what makes a
+ * bookmark useful in the case that matters most.
+ *
+ * Takes one entry or a list of them, and probes sequentially: these are third-party servers and
+ * there is no reason to burst at them.
+ */
+let checkToken = 0;
+
+async function check(subject) {
+  const entries = Array.isArray(subject) ? subject : [subject];
+  const token = ++checkToken;
+
+  for (const entry of entries) {
+    if (token !== checkToken) return;
+    update((next) => next.checks.set(entry.address, { status: "checking" }));
+    let result;
+    try {
+      result = await checkServer(
+        state.install.root,
+        entry.address,
+        entry.queryPort,
+        state.engine,
+      );
+    } catch (error) {
+      update((next) => next.checks.set(entry.address, { status: "failed", error: errorText(error) }));
+      continue;
+    }
+    if (token !== checkToken) return;
+    update((next) => {
+      if (!result.row) {
+        next.checks.set(entry.address, { status: "absent", nonResult: result.non_result });
+        return;
+      }
+      // A server publishes its own game port, so one that moved answers at another address. The
+      // row is real and joins at the address it answered on; the bookmark is left pointing where
+      // the player put it rather than being silently repointed at what may be a different server.
+      if (result.row.address !== entry.address) {
+        next.checks.set(entry.address, { status: "absent", movedTo: result.row.address });
+      } else {
+        next.checks.delete(entry.address);
+      }
+      next.servers = [
+        ...next.servers.filter((row) => row.address !== result.row.address),
+        result.row,
+      ];
+    });
+  }
+}
+
+/**
+ * Check the favourites this sweep did not return, once per sweep.
+ *
+ * Without it, opening Favourites after a refresh shows a list of servers with no data and a row
+ * of buttons to press. Once per sweep, and only for the ones actually missing, keeps it to a
+ * handful of requests against a sweep that just sent a couple of hundred.
+ */
+function autoCheckFavourites() {
+  if (state.scope !== "favourites") return;
+  if (state.browse.running || !state.browse.completedAt) return;
+  if (state.autoCheckedAt === state.browse.completedAt) return;
+  const present = new Set(state.servers.map((row) => row.address));
+  const absent = favourites().filter((entry) => !present.has(entry.address));
+  state.autoCheckedAt = state.browse.completedAt;
+  if (absent.length) check(absent);
+}
+
+subscribe(autoCheckFavourites);
+
 /* Dialogs and global keys ---------------------------------------------------- */
 
 function showNonResults() {
@@ -268,6 +351,12 @@ document.addEventListener("keydown", (event) => {
   } else if (event.key === "F5" || (event.ctrlKey && event.key === "r")) {
     event.preventDefault();
     if (!state.browse.running) refresh();
+  } else if ((event.key === "f" || event.key === "F") && !typing && !event.ctrlKey) {
+    const row = selectedRow();
+    if (!row) return;
+    event.preventDefault();
+    toggleFavourite(row);
+    notify();
   }
 });
 

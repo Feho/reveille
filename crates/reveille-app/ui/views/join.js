@@ -17,12 +17,14 @@ import { el, fill, frag, preserveFocus } from "../lib/dom.js";
 import {
   bytes,
   displayPath,
+  launchedLabel,
   mapKey,
   mapName,
   plural,
   stateExplanation,
   stateName,
 } from "../lib/format.js";
+import { historyByAddress, isFavourite, toggleFavourite } from "../lib/bookmarks.js";
 import { selectedRow, state, update } from "../lib/store.js";
 
 export function joinView(root, { onJoin }) {
@@ -75,12 +77,46 @@ function body(row) {
 }
 
 function header(row, server) {
+  const starred = isFavourite(row.address);
+  const launched = launchedLabel(historyByAddress().get(row.address));
   return el(
     "div",
     { className: "detail__head" },
     el("p", { className: "label" }, "Server"),
-    el("h2", { className: "detail__title" }, server.hostname || "(unnamed server)"),
+    el(
+      "div",
+      { className: "detail__title-row" },
+      el("h2", { className: "detail__title" }, server.hostname || "(unnamed server)"),
+      el(
+        "button",
+        {
+          type: "button",
+          className: "star star--lg",
+          dataset: { focusKey: "detail-star" },
+          "aria-pressed": starred ? "true" : "false",
+          "aria-label": `Favourite ${server.hostname || row.address}`,
+          title: starred ? "Remove from favourites" : "Add to favourites",
+          onclick: () => {
+            toggleFavourite(row);
+            update(() => {});
+          },
+        },
+        starred ? "★" : "☆",
+      ),
+    ),
     el("p", { className: "data quiet selectable" }, row.address),
+    // What Reveille did, not what the server did: it started the game and saw it start. Whether
+    // this server admitted the player is decided at connect time and never observed (H12).
+    launched &&
+      el(
+        "p",
+        {
+          className: "quiet",
+          title:
+            "Reveille started the game connecting to this server. Whether the server let you in is not something Reveille can see.",
+        },
+        launched,
+      ),
   );
 }
 

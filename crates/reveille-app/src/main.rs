@@ -20,8 +20,8 @@ use reveille_core::content::{
     WantedMap,
 };
 use reveille_core::discovery::{
-    self, BrowseConfig, BrowseEvent, BrowseSummary, NonResult, NonResultReason, ProbeStage, Server,
-    TargetGame,
+    self, BrowseConfig, BrowseEvent, BrowseSummary, MasterEndpoint, NonResult, NonResultReason,
+    ProbeStage, QueryPort, Server, TargetGame,
 };
 use reveille_core::engine::EngineChoice;
 use reveille_core::install::{self, Installation};
@@ -51,6 +51,12 @@ const PREVIEW_EVENT: &str = "reveille://preview";
 const INSTALL_EVENT: &str = "reveille://install";
 const OPENMOHAA_INSTALL_EVENT: &str = "reveille://openmohaa-install";
 const REBORN_INSTALL_EVENT: &str = "reveille://reborn-install";
+
+/// Deadline for one per-server UDP probe.
+///
+/// The sweep and the single-server check share it deliberately: a remembered server checked on a
+/// gentler deadline than the sweep uses would be listed on terms the list itself never offered.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(2_500);
 
 /// Bytes between download progress emissions. A 24 MB shopping list produces a few hundred events
 /// rather than tens of thousands.
@@ -107,6 +113,16 @@ struct BrowserServer {
     address: SocketAddrV4,
     server: Server,
     compatibility: CompatibilityAssessment,
+}
+
+/// What checking one remembered server found.
+///
+/// Never an error and never an empty success: either the server answered and is now joinable, or
+/// the reason it did not is recorded (H9).
+#[derive(Serialize)]
+struct CheckResult {
+    row: Option<BrowserServer>,
+    non_result: Option<NonResultGroup>,
 }
 
 /// Recorded non-results grouped for display. Individual reasons stay distinguishable; only the
@@ -853,13 +869,7 @@ async fn browse_servers(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserPayload, String> {
-    let installation = install::identify(&path).map_err(|error| error.to_string())?;
-    platform::engine::resolve_choice(&installation.root, Some(engine))
-        .map_err(|error| error.to_string())?;
-    let client = platform::ClientKind::from(engine);
-    let target = platform::resolve_install_target(&installation.root, "main", client)
-        .map_err(|error| error.to_string())?;
-    let index = MapIndex::scan(&target.game_directory).map_err(|error| error.to_string())?;
+    let (_, index) = installed_maps(&path, engine)?;
 
     // A stop pressed just as the previous sweep ended leaves a permit behind, which would cancel
     // this one before it probed anything. Consume it: polling `notified` once resolves immediately
@@ -880,7 +890,7 @@ async fn browse_servers(
             limit: None,
             concurrency: 16,
             master_timeout: Duration::from_secs(15),
-            probe_timeout: Duration::from_millis(2_500),
+            probe_timeout: PROBE_TIMEOUT,
         },
         sink,
     ));
@@ -987,6 +997,86 @@ async fn stream_sweep(
         // A frontend that stopped listening is not an error; the sweep result is still worth having.
         drop(app.emit(BROWSE_EVENT, progress.clone()));
     }
+}
+
+/// Check one remembered server directly, with no master list involved.
+///
+/// A favourite is often not in the current sweep — the master never registered it, or it did not
+/// answer in time. Without this the bookmark would be a dead row: `install_and_launch` resolves
+/// its target out of the sweep's list, so a server missing from that list cannot be joined at all.
+/// A server that answers here is merged into the same list and becomes joinable like any other.
+#[tauri::command]
+async fn check_server(
+    path: String,
+    address: String,
+    query_port: u16,
+    engine: EngineChoice,
+    state: tauri::State<'_, AppState>,
+) -> Result<CheckResult, String> {
+    let address = address
+        .parse::<SocketAddrV4>()
+        .map_err(|error| format!("invalid server address: {error}"))?;
+    let (_, index) = installed_maps(&path, engine)?;
+    let endpoint = MasterEndpoint {
+        address: *address.ip(),
+        query_port: QueryPort::new(query_port),
+    };
+    let outcome = discovery::inspect_endpoint(endpoint, PROBE_TIMEOUT).await;
+
+    let Some(server) = outcome.server else {
+        // Not an error. Why it did not answer is what the player asked for.
+        return Ok(CheckResult {
+            row: None,
+            non_result: outcome
+                .non_result
+                .as_ref()
+                .and_then(|non_result| group_non_results(std::iter::once(non_result)).pop()),
+        });
+    };
+    // The server publishes its own `hostport`, so a server that moved answers at an address other
+    // than the remembered one. The row carries the address it actually answered at; repointing the
+    // bookmark at it would be a guess about whether it is the same server.
+    let row = classified(&server, &index);
+    let mut servers = state
+        .servers
+        .lock()
+        .map_err(|_| "server list state is unavailable".to_owned())?;
+    merge_checked_server(&mut servers, server);
+    drop(servers);
+    Ok(CheckResult {
+        row: Some(row),
+        non_result: None,
+    })
+}
+
+/// Merge a freshly checked server into the current list, replacing any entry for the same game
+/// endpoint.
+///
+/// Appending would leave `find_server` resolving whichever copy it reached first, so a join could
+/// be prepared from figures this check has already superseded.
+fn merge_checked_server(servers: &mut Vec<Server>, server: Server) {
+    let endpoint = (server.endpoint.address, server.game_port);
+    servers.retain(|existing| (existing.endpoint.address, existing.game_port) != endpoint);
+    servers.push(server);
+}
+
+/// Resolve the installation, confirm the engine it will run, and index the maps on disk.
+///
+/// Every command that classifies a server needs these in this order: an unresolvable engine choice
+/// must fail before a directory is probed for writability, and the index has to come from the
+/// directory that engine actually reads.
+fn installed_maps(
+    path: &str,
+    engine: EngineChoice,
+) -> Result<(platform::InstallTarget, MapIndex), String> {
+    let installation = install::identify(path).map_err(|error| error.to_string())?;
+    platform::engine::resolve_choice(&installation.root, Some(engine))
+        .map_err(|error| error.to_string())?;
+    let client = platform::ClientKind::from(engine);
+    let target = platform::resolve_install_target(&installation.root, "main", client)
+        .map_err(|error| error.to_string())?;
+    let index = MapIndex::scan(&target.game_directory).map_err(|error| error.to_string())?;
+    Ok((target, index))
 }
 
 fn classified(server: &Server, index: &MapIndex) -> BrowserServer {
@@ -1288,13 +1378,7 @@ async fn build_preview(
     engine: EngineChoice,
     app: Option<&tauri::AppHandle>,
 ) -> Result<JoinPreview, String> {
-    let installation = install::identify(path).map_err(|error| error.to_string())?;
-    platform::engine::resolve_choice(&installation.root, Some(engine))
-        .map_err(|error| error.to_string())?;
-    let client_kind = platform::ClientKind::from(engine);
-    let target = platform::resolve_install_target(&installation.root, "main", client_kind)
-        .map_err(|error| error.to_string())?;
-    let index = MapIndex::scan(&target.game_directory).map_err(|error| error.to_string())?;
+    let (target, index) = installed_maps(path, engine)?;
     let first = reveille_core::join::classify_server(&index, &server, None);
     let wanted = first.preflight.as_ref().map_or_else(Vec::new, wanted_maps);
     let address = SocketAddrV4::new(server.endpoint.address, server.game_port.get());
@@ -1445,6 +1529,7 @@ fn main() {
             pick_install_folder,
             cancel_browse,
             browse_servers,
+            check_server,
             preview_join,
             install_and_launch
         ])
@@ -1470,9 +1555,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        AppState, OpenMohaaFailure, OpenMohaaFailureKind, OpenMohaaInstalledBuild,
-        cache_openmohaa_offer, cached_openmohaa_offer, installed_openmohaa_build, launch_refusal,
-        openmohaa_client_path, preview_cache_matches, record_openmohaa_install,
+        AppState, MasterEndpoint, OpenMohaaFailure, OpenMohaaFailureKind, OpenMohaaInstalledBuild,
+        QueryPort, Server, cache_openmohaa_offer, cached_openmohaa_offer,
+        installed_openmohaa_build, launch_refusal, merge_checked_server, openmohaa_client_path,
+        preview_cache_matches, record_openmohaa_install,
     };
 
     fn assessment(
@@ -1683,6 +1769,80 @@ mod tests {
             installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &preview),
             OpenMohaaInstalledBuild::Unknown
         );
+    }
+
+    /// The minimum of a `Server` this test needs: the two fields that identify a game endpoint,
+    /// plus a hostname to tell two answers apart.
+    fn probed(address: &str, query_port: u16, game_port: u16, hostname: &str) -> Server {
+        Server {
+            endpoint: MasterEndpoint {
+                address: address.parse().expect("address"),
+                query_port: QueryPort::new(query_port),
+            },
+            game_port: reveille_core::discovery::GamePort::new(game_port),
+            hostname: hostname.to_owned(),
+            game_name: None,
+            game_version: None,
+            version: None,
+            protocol: None,
+            current_map: None,
+            rotation: Vec::new(),
+            allow_download: None,
+            map_checksum: None,
+            pr_downloads: None,
+            minimum_ping: None,
+            maximum_ping: None,
+            join_window: None,
+            reserved_slots: None,
+            occupancy: reveille_core::discovery::ReportedOccupancy::default(),
+            client_capacity: None,
+            pure: None,
+            status_round_trip: reveille_core::discovery::RoundTripMillis::new(12),
+        }
+    }
+
+    #[test]
+    fn checking_a_server_replaces_its_entry_rather_than_adding_a_second() {
+        let mut servers = vec![
+            probed("10.0.0.1", 12300, 12203, "stale"),
+            probed("10.0.0.2", 12300, 12203, "another server"),
+        ];
+
+        merge_checked_server(&mut servers, probed("10.0.0.1", 12300, 12203, "fresh"));
+
+        assert_eq!(servers.len(), 2);
+        // `find_server` takes the first match, so a stale copy left behind would be the one a join
+        // is prepared from.
+        assert!(servers.iter().all(|server| server.hostname != "stale"));
+        assert!(servers.iter().any(|server| server.hostname == "fresh"));
+        assert!(
+            servers
+                .iter()
+                .any(|server| server.hostname == "another server")
+        );
+    }
+
+    #[test]
+    fn a_server_reregistered_under_a_new_query_port_leaves_no_duplicate_game_endpoint() {
+        // The master can hand out a different query port for the same server. Identity is the
+        // game endpoint, because that is what a join connects to.
+        let mut servers = vec![probed("10.0.0.1", 12300, 12203, "stale")];
+
+        merge_checked_server(&mut servers, probed("10.0.0.1", 12400, 12203, "fresh"));
+
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].hostname, "fresh");
+    }
+
+    #[test]
+    fn a_server_that_moved_to_another_game_port_is_kept_alongside_the_old_entry() {
+        // Different game endpoint, so it is a different join target. Collapsing the two would be
+        // a guess that the server merely moved rather than that a second one exists.
+        let mut servers = vec![probed("10.0.0.1", 12300, 12203, "old port")];
+
+        merge_checked_server(&mut servers, probed("10.0.0.1", 12300, 12204, "new port"));
+
+        assert_eq!(servers.len(), 2);
     }
 
     #[test]
