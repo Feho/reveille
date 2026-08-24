@@ -280,7 +280,9 @@ not reintroduce a blanket rebuild of any region containing a text input.**
 - **`version` vs `game_version`**: the list uses `game_version` (`1.11`, `1.12+0.83.0`) because it
   is short and comparable. `version` is a sentence — "Medal of Honor Allied Assault 1.11 win-x86
   Mar 5 2002" — which truncates to "Medal of Honor Allied" in every row and distinguishes nothing.
-  The detail pane shows the full string, where it has room.
+  The full string is the row's tooltip. The detail pane does not repeat either: compatibility is
+  what the player is deciding, and the Join check states it outright, so a version number there is
+  a fact with no next click attached.
 
 ## 9. Copy
 

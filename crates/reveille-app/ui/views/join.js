@@ -17,7 +17,6 @@ import { el, fill, frag, preserveFocus } from "../lib/dom.js";
 import {
   bytes,
   displayPath,
-  engineLabel,
   mapKey,
   mapName,
   plural,
@@ -70,9 +69,8 @@ function body(row) {
     facts(server),
     result ? outcomeSection(result) : null,
     run ? installSection(run) : null,
-    !run && !result ? verdictSection(assessment, preview) : null,
+    !run && !result ? verdictSection(assessment, preview, server) : null,
     !run && !result ? rotationSection(row, assessment, preview) : null,
-    warnings(server),
   );
 }
 
@@ -94,8 +92,6 @@ function facts(server) {
     el(
       "dl",
       { className: "kv" },
-      el("dt", null, "Engine"),
-      el("dd", null, engineLabel(server)),
       el("dt", null, "Now"),
       el("dd", null, server.current_map ? mapName(server.current_map) : "not published"),
       el("dt", null, "Rotation"),
@@ -106,17 +102,11 @@ function facts(server) {
       server.reserved_slots
         ? el("dd", null, `${plural(server.reserved_slots, "slot")} held back`)
         : null,
-      server.join_window
-        ? el("dt", null, "Join window")
-        : null,
-      server.join_window
-        ? el("dd", null, `closes ${server.join_window}s after a round starts`)
-        : null,
     ),
   );
 }
 
-function verdictSection(assessment, preview) {
+function verdictSection(assessment, preview, server) {
   const resolving = state.previewProgress && !preview;
   const totals = preview ? shoppingTotals(preview) : null;
 
@@ -143,6 +133,7 @@ function verdictSection(assessment, preview) {
         )
       : null,
     state.previewError ? el("p", { className: "error", role: "alert" }, state.previewError) : null,
+    caveats(server),
   );
 }
 
@@ -445,8 +436,15 @@ function outcomeSection(result) {
   );
 }
 
-/** Facts about this server that change how a join goes, stated once, without alarm. */
-function warnings(server) {
+/**
+ * The limits of the check just above, stated where the check is read.
+ *
+ * These are not general trivia about the server: each one is a reason the verdict may be weaker
+ * than it looks, so they sit inside the verdict section rather than under a heading of their own.
+ * A missing checksum in particular means "compatible" was decided on names alone, and saying so
+ * is what keeps that word honest.
+ */
+function caveats(server) {
   const notes = [];
   if (server.allow_download === 0) {
     notes.push("Sends no files — anything missing has to be here before you join.");
@@ -457,8 +455,7 @@ function warnings(server) {
   if (!notes.length) return null;
   return el(
     "div",
-    { className: "detail__section" },
-    el("p", { className: "label" }, "Worth knowing"),
+    { className: "stack--tight" },
     notes.map((note) => el("p", { className: "quiet" }, note)),
   );
 }

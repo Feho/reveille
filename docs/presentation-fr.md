@@ -303,10 +303,12 @@ Libellé `SERVER`, le nom d'hôte en grand, l'adresse `ip:port` en dessous (sél
 curseur, pour la copier).
 
 ### C.2 Faits du serveur
-Une liste clé/valeur : **Engine** (chaîne moteur complète, ex. « Medal of Honor Allied Assault
-1.11 win-x86 Mar 5 2002 »), **Now** (carte en cours ou `not published`), **Rotation** (`14 maps` ou
-`not published`), et si publiés : **Reserved** (`2 slots held back`) et **Join window**
-(`closes 90s after a round starts`).
+Une liste clé/valeur : **Now** (carte en cours ou `not published`), **Rotation** (`14 maps` ou
+`not published`), et si publié : **Reserved** (`2 slots held back`).
+
+La version du moteur n'apparaît pas ici : la liste la porte déjà dans la colonne **Runs**, et la
+compatibilité est énoncée par le Join check, pas par un numéro de version que le joueur devrait
+interpréter. La **join window** n'y figure pas non plus — elle ne change rien à la réussite du join.
 
 ### C.3 Join check
 Libellé `JOIN CHECK`, puis le **nom d'état** en titre : `Compatible` / `Needs 7 maps` /
@@ -334,12 +336,14 @@ envoyé :
 | **No source** | `✕ obj/rarecustom  —` + « Not in any catalogue Reveille can reach. » | infobulle : « You can play here until the rotation reaches these maps, then you are dropped. » |
 | **Missing locally** | Cartes manquantes que la résolution n'a pas encore couvertes : `not on disk` ou `different file` | état transitoire |
 
-### C.5 Worth knowing
-Section qui n'apparaît que si l'un de ces faits est vrai, une phrase chacun, sans alarmisme :
+### C.5 Limites du verdict
+Ces phrases n'apparaissent que si le fait correspondant est vrai, une phrase chacune, sans
+alarmisme. Elles sont placées **à l'intérieur du Join check (C.3)**, sous le verdict, et non dans
+une section à part : chacune dit pourquoi le verdict peut être plus faible qu'il n'en a l'air.
 - « Sends no files — anything missing has to be here before you join. » (le serveur refuse
   d'envoyer les fichiers lui-même)
 - « Publishes no map checksum, so only names are matched, not files. » (seuls 30 serveurs sur 127
-  publient un checksum)
+  publient un checksum) — c'est ce qui empêche « Compatible » de promettre plus qu'un accord de noms
 
 ### C.6 Barre d'action (fixée en bas du panneau)
 
