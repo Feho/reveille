@@ -303,6 +303,23 @@ impl LaunchProfile {
             TargetGame::Breakthrough => "maintt",
         }
     }
+
+    /// Game directories the engine reads for this profile, **lowest precedence first**.
+    ///
+    /// An expansion does not replace `main`; it is added after it. `FS_Startup`
+    /// (`files.cpp:3640-3645`) adds `com_basegame`, which is always `main`, and then adds
+    /// `fs_basegame`, which `Com_InitTargetGameWithType` (`common.c:3181,3208`) sets to `mainta`
+    /// for Spearhead and `maintt` for Breakthrough. `fs_searchpaths` is prepend-to-head, so the
+    /// directory added last is searched first: an expansion shadows `main`, and Breakthrough
+    /// never reads `mainta`.
+    #[must_use]
+    pub const fn search_directories(self) -> &'static [&'static str] {
+        match self.target {
+            TargetGame::AlliedAssault => &["main"],
+            TargetGame::Spearhead => &["main", "mainta"],
+            TargetGame::Breakthrough => &["main", "maintt"],
+        }
+    }
 }
 
 /// A process-neutral command description. M4 constructs this but never launches it.
@@ -568,6 +585,25 @@ mod tests {
     use crate::mapindex::MapIndex;
 
     #[test]
+    fn an_expansion_reads_main_underneath_its_own_directory() {
+        // common.c:3181,3208 with files.cpp:3640-3645: `main` is added first and the expansion
+        // directory after it, so the expansion shadows `main` rather than replacing it.
+        assert_eq!(
+            LaunchProfile::new(TargetGame::AlliedAssault).search_directories(),
+            ["main"]
+        );
+        assert_eq!(
+            LaunchProfile::new(TargetGame::Spearhead).search_directories(),
+            ["main", "mainta"]
+        );
+        // Breakthrough never reads `mainta`: `fs_basegame` holds one directory.
+        assert_eq!(
+            LaunchProfile::new(TargetGame::Breakthrough).search_directories(),
+            ["main", "maintt"]
+        );
+    }
+
+    #[test]
     fn constructs_target_profile_mod_and_connect_arguments() {
         let command = LaunchCommand::new(
             "openmohaa",
@@ -821,6 +857,7 @@ mod tests {
             version: None,
             protocol: Some("8".to_owned()),
             current_map: None,
+            game_type: None,
             rotation,
             allow_download: None,
             map_checksum: None,

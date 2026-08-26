@@ -212,12 +212,36 @@ impl MapIndex {
     /// Returns an error when the directory or one of its packages cannot be read. Malformed and
     /// engine-incompatible BSP entries are recorded in [`Self::skipped`] and do not abort a scan.
     pub fn scan(game_directory: impl AsRef<Path>) -> Result<Self, Error> {
-        let game_directory = game_directory.as_ref();
+        Self::scan_chain(&[game_directory])
+    }
+
+    /// Scan every game directory the engine reads, **lowest precedence first**.
+    ///
+    /// This is the whole search path, not one directory: Spearhead reads `main` and then
+    /// `mainta`, and a Breakthrough install reads `main` and then `maintt`
+    /// (`LaunchProfile::search_directories`). The engine prepends each search path it adds, so a
+    /// map present in both directories is provided by the later one — and both providers are
+    /// listed, in that order, because a checksum comparison needs the file the engine will
+    /// actually load and the one it shadows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a directory or one of its packages cannot be read. Malformed and
+    /// engine-incompatible BSP entries are recorded in [`Self::skipped`] and do not abort a scan.
+    pub fn scan_chain<P: AsRef<Path>>(directories: &[P]) -> Result<Self, Error> {
+        let mut index = Self::default();
+        for directory in directories {
+            index.scan_game_directory(directory.as_ref())?;
+        }
+        index.update_stats();
+        Ok(index)
+    }
+
+    fn scan_game_directory(&mut self, game_directory: &Path) -> Result<(), Error> {
         if !game_directory.is_dir() {
             return Err(Error::NotDirectory(game_directory.to_path_buf()));
         }
 
-        let mut index = Self::default();
         let entries = fs::read_dir(game_directory)
             .map_err(|source| Error::ReadDirectory {
                 path: game_directory.to_path_buf(),
@@ -249,17 +273,16 @@ impl MapIndex {
         for package in packages {
             let path = package.path();
             if path.is_dir() {
-                index.scan_pk3dir(&path)?;
-                index.stats.package_directories += 1;
+                self.scan_pk3dir(&path)?;
+                self.stats.package_directories += 1;
             } else {
-                index.scan_pk3(&path)?;
-                index.stats.archives += 1;
+                self.scan_pk3(&path)?;
+                self.stats.archives += 1;
             }
         }
 
-        index.scan_loose(game_directory)?;
-        index.update_stats();
-        Ok(index)
+        self.scan_loose(game_directory)?;
+        Ok(())
     }
 
     /// Return a map by a case- and separator-insensitive server name.
@@ -347,7 +370,7 @@ impl MapIndex {
     fn scan_loose(&mut self, game_directory: &Path) -> Result<(), Error> {
         let maps = game_directory.join("maps");
         if maps.is_dir() {
-            self.stats.loose_bsp_files =
+            self.stats.loose_bsp_files +=
                 self.scan_tree(game_directory, &maps, |path, entry, header| {
                     Provider::Loose {
                         path: path.to_path_buf(),
@@ -446,7 +469,8 @@ impl MapIndex {
     }
 
     fn update_stats(&mut self) {
-        // Packages were added alphabetically and the loose directory last. Because the engine
+        // Game directories were scanned lowest precedence first, and within each one the
+        // packages were added alphabetically and the loose directory last. Because the engine
         // prepends every search path, reverse that addition order into lookup order.
         for map in self.maps.values_mut() {
             map.providers.reverse();
@@ -614,6 +638,91 @@ mod tests {
         assert_eq!(index.stats().package_directories, 1);
         assert_eq!(index.stats().maps, 1);
         assert_eq!(index.stats().multi_provider_maps, 1);
+    }
+
+    #[test]
+    fn an_expansion_directory_shadows_main_without_hiding_it() {
+        // `main` is added first and `mainta` after it, so a map in both is loaded from `mainta`
+        // and the copy in `main` is still listed underneath it (join.rs `search_directories`).
+        let temporary = TempDir::new().expect("temporary directory");
+        let main = temporary.path().join("main");
+        let mainta = temporary.path().join("mainta");
+        fs::create_dir_all(&main).expect("main directory");
+        fs::create_dir_all(&mainta).expect("mainta directory");
+        write_pk3(&main.join("pak0.pk3"), "maps/dm/mohdm6.bsp", 11);
+        write_pk3(&main.join("pak1.pk3"), "maps/dm/aa_only.bsp", 12);
+        write_pk3(&mainta.join("pak1.pk3"), "maps/dm/mohdm6.bsp", 21);
+
+        let index = MapIndex::scan_chain(&[&main, &mainta]).expect("scan the search path");
+
+        let shared = index.get("dm/mohdm6").expect("shared map");
+        assert_eq!(shared.providers.len(), 2);
+        assert_eq!(
+            shared.effective_provider().map(Provider::checksum),
+            Some(crate::bsp::Checksum::new(21))
+        );
+        assert!(matches!(
+            &shared.providers[1],
+            Provider::Pk3 { archive, .. } if archive.starts_with(&main)
+        ));
+        // A base-game map stays reachable from the expansion.
+        assert!(index.get("dm/aa_only").is_some());
+        assert_eq!(index.stats().archives, 3);
+        assert_eq!(index.stats().multi_provider_maps, 1);
+    }
+
+    #[test]
+    fn every_scan_count_accumulates_across_the_chain() {
+        // Each per-directory counter is written by the same code for every directory in the
+        // chain, so an assignment where an addition was meant would silently report only the
+        // last directory's files. Loose files are the one that was actually wrong once.
+        let temporary = TempDir::new().expect("temporary directory");
+        let main = temporary.path().join("main");
+        let mainta = temporary.path().join("mainta");
+        fs::create_dir_all(main.join("maps/dm")).expect("main loose maps");
+        fs::create_dir_all(mainta.join("maps/dm")).expect("mainta loose maps");
+        fs::create_dir_all(main.join("base.pk3dir/maps/dm")).expect("main pk3dir");
+        fs::create_dir_all(mainta.join("extra.pk3dir/maps/dm")).expect("mainta pk3dir");
+
+        write_pk3(&main.join("pak0.pk3"), "maps/dm/packaged.bsp", 1);
+        write_pk3(&mainta.join("pak1.pk3"), "maps/dm/packaged.bsp", 2);
+        fs::write(main.join("base.pk3dir/maps/dm/shared.bsp"), bsp(3)).expect("main pk3dir BSP");
+        fs::write(mainta.join("extra.pk3dir/maps/dm/shared.bsp"), bsp(4))
+            .expect("mainta pk3dir BSP");
+        fs::write(main.join("maps/dm/loose_base.bsp"), bsp(5)).expect("main loose BSP");
+        fs::write(mainta.join("maps/dm/loose_expansion.bsp"), bsp(6)).expect("mainta loose BSP");
+        // Malformed in the *first* directory of the chain: a later pass must not drop it.
+        fs::write(main.join("maps/dm/truncated.bsp"), b"2015").expect("truncated loose BSP");
+
+        let index = MapIndex::scan_chain(&[&main, &mainta]).expect("scan the search path");
+
+        let stats = index.stats();
+        assert_eq!(stats.archives, 2);
+        assert_eq!(stats.package_directories, 2);
+        assert_eq!(stats.loose_bsp_files, 3);
+        assert_eq!(stats.skipped_entries, 1);
+        assert_eq!(stats.multi_provider_maps, 2);
+        assert_eq!(index.skipped().len(), 1);
+
+        // A loose file in `mainta` beats every package, in `mainta` or in `main`; a loose file in
+        // `main` beats `main`'s packages and loses to everything in `mainta`.
+        let expansion_loose = index
+            .get("dm/loose_expansion")
+            .expect("expansion loose map");
+        assert!(matches!(
+            expansion_loose.providers.as_slice(),
+            [Provider::Loose { .. }]
+        ));
+        let shared = index.get("dm/shared").expect("map in both pk3dirs");
+        assert_eq!(
+            shared.effective_provider().map(Provider::checksum),
+            Some(crate::bsp::Checksum::new(4))
+        );
+        let base_loose = index.get("dm/loose_base").expect("base loose map");
+        assert!(matches!(
+            base_loose.providers.as_slice(),
+            [Provider::Loose { .. }]
+        ));
     }
 
     #[test]

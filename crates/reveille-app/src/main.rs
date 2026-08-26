@@ -97,6 +97,7 @@ struct CachedOpenMohaaOffer {
 struct CachedPreview {
     install_root: PathBuf,
     engine: EngineChoice,
+    game: TargetGame,
     preview: JoinPreview,
 }
 
@@ -123,6 +124,8 @@ struct BrowserServer {
 struct CheckResult {
     row: Option<BrowserServer>,
     non_result: Option<NonResultGroup>,
+    /// The server answered, but for another of the three games (H14).
+    other_game: Option<TargetGame>,
 }
 
 /// Recorded non-results grouped for display. Individual reasons stay distinguishable; only the
@@ -181,6 +184,7 @@ struct JoinPreview {
     game_directory: PathBuf,
     used_home_fallback: bool,
     engine: EngineChoice,
+    game: TargetGame,
 }
 
 /// One map that could not be installed. Structured rather than pre-formatted prose, so the
@@ -207,6 +211,7 @@ struct JoinResult {
     game_directory: PathBuf,
     used_home_fallback: bool,
     engine: EngineChoice,
+    game: TargetGame,
     outcome: LaunchOutcome,
 }
 
@@ -841,7 +846,7 @@ async fn pick_install_folder(app: tauri::AppHandle) -> Result<Option<String>, St
     let (sender, receiver) = oneshot::channel();
     app.dialog()
         .file()
-        .set_title("Select your Medal of Honor: Allied Assault folder")
+        .set_title("Select your Allied Assault game folder")
         .pick_folder(move |folder| {
             // The receiver is only gone if the window closed while the dialog was open.
             drop(sender.send(folder));
@@ -864,12 +869,11 @@ fn cancel_browse(state: tauri::State<'_, AppState>) {
 
 #[tauri::command]
 async fn browse_servers(
-    path: String,
-    engine: EngineChoice,
+    session: Session,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<BrowserPayload, String> {
-    let (_, index) = installed_maps(&path, engine)?;
+    let (_, index) = installed_maps(&session)?;
 
     // A stop pressed just as the previous sweep ended leaves a permit behind, which would cancel
     // this one before it probed anything. Consume it: polling `notified` once resolves immediately
@@ -886,7 +890,7 @@ async fn browse_servers(
     let (sink, mut events) = mpsc::channel(64);
     let sweep = tokio::spawn(discovery::browse_streaming(
         BrowseConfig {
-            target: TargetGame::AlliedAssault,
+            target: session.game,
             limit: None,
             concurrency: 16,
             master_timeout: Duration::from_secs(15),
@@ -1007,16 +1011,15 @@ async fn stream_sweep(
 /// A server that answers here is merged into the same list and becomes joinable like any other.
 #[tauri::command]
 async fn check_server(
-    path: String,
+    session: Session,
     address: String,
     query_port: u16,
-    engine: EngineChoice,
     state: tauri::State<'_, AppState>,
 ) -> Result<CheckResult, String> {
     let address = address
         .parse::<SocketAddrV4>()
         .map_err(|error| format!("invalid server address: {error}"))?;
-    let (_, index) = installed_maps(&path, engine)?;
+    let (_, index) = installed_maps(&session)?;
     let endpoint = MasterEndpoint {
         address: *address.ip(),
         query_port: QueryPort::new(query_port),
@@ -1025,14 +1028,30 @@ async fn check_server(
 
     let Some(server) = outcome.server else {
         // Not an error. Why it did not answer is what the player asked for.
+        //
+        // The entry goes with it. This list is what `find_server` prepares a join from, and a check
+        // that ran and got no answer is evidence about now that outranks whatever the sweep saw —
+        // the same reason the shell drops the row (docs/rules.md H12). Leaving it would keep a join
+        // preparable from figures the interface has already withdrawn.
+        forget_checked_server(&state, address)?;
         return Ok(CheckResult {
             row: None,
             non_result: outcome
                 .non_result
                 .as_ref()
                 .and_then(|non_result| group_non_results(std::iter::once(non_result)).pop()),
+            other_game: None,
         });
     };
+    if let Some(published) = answered_for_another_game(&server, session.game) {
+        // It answered, for a game this session's client cannot join. Not a joinable entry either.
+        forget_checked_server(&state, address)?;
+        return Ok(CheckResult {
+            row: None,
+            non_result: None,
+            other_game: Some(published),
+        });
+    }
     // The server publishes its own `hostport`, so a server that moved answers at an address other
     // than the remembered one. The row carries the address it actually answered at; repointing the
     // bookmark at it would be a guess about whether it is the same server.
@@ -1046,7 +1065,23 @@ async fn check_server(
     Ok(CheckResult {
         row: Some(row),
         non_result: None,
+        other_game: None,
     })
+}
+
+/// The family a checked server belongs to, when it is not this session's.
+///
+/// A bookmark is an address, so it outlives the game it was starred under. A server that answers
+/// for another family is real and reachable and still cannot be joined from this session: the
+/// client this session launches speaks a different protocol and would be dropped at connect. A
+/// server that publishes no family at all is not guessed about — it is listed, exactly as the
+/// sweep would have listed it.
+fn answered_for_another_game(server: &Server, game: TargetGame) -> Option<TargetGame> {
+    server
+        .game_name
+        .as_deref()
+        .and_then(TargetGame::from_game_name)
+        .filter(|published| *published != game)
 }
 
 /// Merge a freshly checked server into the current list, replacing any entry for the same game
@@ -1060,23 +1095,106 @@ fn merge_checked_server(servers: &mut Vec<Server>, server: Server) {
     servers.push(server);
 }
 
+/// Drop the entry for a game endpoint a check has just found nothing at.
+///
+/// Deliberately keyed on the game address the check was asked about, not on the query port: the
+/// caller asked about one join target and learned that it is not there.
+fn forget_checked_server(
+    state: &tauri::State<'_, AppState>,
+    address: SocketAddrV4,
+) -> Result<(), String> {
+    let mut servers = state
+        .servers
+        .lock()
+        .map_err(|_| "server list state is unavailable".to_owned())?;
+    servers.retain(|existing| {
+        (existing.endpoint.address, existing.game_port.get()) != (*address.ip(), address.port())
+    });
+    Ok(())
+}
+
+/// What every server-facing command needs before it can say anything: which game folder, which
+/// engine program, and which of the three games.
+///
+/// One struct rather than three repeated parameters, so a command cannot be given the folder and
+/// the engine and quietly left with the wrong game.
+#[derive(Clone, Deserialize)]
+struct Session {
+    path: String,
+    engine: EngineChoice,
+    game: TargetGame,
+}
+
 /// Resolve the installation, confirm the engine it will run, and index the maps on disk.
 ///
-/// Every command that classifies a server needs these in this order: an unresolvable engine choice
-/// must fail before a directory is probed for writability, and the index has to come from the
-/// directory that engine actually reads.
-fn installed_maps(
-    path: &str,
-    engine: EngineChoice,
-) -> Result<(platform::InstallTarget, MapIndex), String> {
-    let installation = install::identify(path).map_err(|error| error.to_string())?;
-    platform::engine::resolve_choice(&installation.root, Some(engine))
+/// Every command that classifies a server needs these in this order: a game the install has no
+/// assets for and an unresolvable engine choice must both fail before a directory is probed for
+/// writability, and the index has to come from every directory that engine actually reads —
+/// which for an expansion is `main` underneath `mainta` or `maintt`, not the expansion alone.
+fn installed_maps(session: &Session) -> Result<(platform::InstallTarget, MapIndex), String> {
+    let install = install_destination(session)?;
+    let index = reindex(session, &install)?;
+    Ok((install, index))
+}
+
+/// Resolve where downloaded content goes for this session, and nothing else.
+///
+/// Split out because a join must resolve it **once**: the probe can legitimately answer
+/// differently a second time — a folder that was locked when the preview ran may be writable when
+/// the install finishes — and reporting the second answer would name a directory the files were
+/// never written to (rule H8).
+fn install_destination(session: &Session) -> Result<platform::InstallTarget, String> {
+    let installation = install::identify(&session.path).map_err(|error| error.to_string())?;
+    if !installation.provides(session.game) {
+        // The directory name is what the check actually looked at, and it is exactly the detail a
+        // newcomer cannot act on. Say which game is missing from the folder they picked.
+        return Err(format!(
+            "{} cannot be run from this game folder: its game files are not there.",
+            session.game.label()
+        ));
+    }
+    platform::engine::resolve_choice(&installation.root, Some(session.engine))
         .map_err(|error| error.to_string())?;
-    let client = platform::ClientKind::from(engine);
-    let target = platform::resolve_install_target(&installation.root, "main", client)
-        .map_err(|error| error.to_string())?;
-    let index = MapIndex::scan(&target.game_directory).map_err(|error| error.to_string())?;
-    Ok((target, index))
+    platform::resolve_install_target(
+        &installation.root,
+        LaunchProfile::new(session.game).data_directory(),
+        platform::ClientKind::from(session.engine),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Index every directory this session's engine reads, around an already-resolved destination.
+///
+/// # Errors
+///
+/// Returns an error when the installation cannot be identified or a directory cannot be read.
+fn reindex(session: &Session, install: &platform::InstallTarget) -> Result<MapIndex, String> {
+    let installation = install::identify(&session.path).map_err(|error| error.to_string())?;
+    let search = search_path(
+        &installation.root,
+        session.game,
+        platform::ClientKind::from(session.engine),
+        install,
+    );
+    MapIndex::scan_chain(&search).map_err(|error| error.to_string())
+}
+
+/// The engine's search path, with the directory Reveille writes to guaranteed to be in it.
+///
+/// `content_search_path` lists only directories that exist, and the home fallback is created the
+/// moment it is chosen — so on the first fallback install the destination would otherwise be
+/// absent from the index that decides whether the download worked.
+fn search_path(
+    install_root: &Path,
+    game: TargetGame,
+    client: platform::ClientKind,
+    install: &platform::InstallTarget,
+) -> Vec<PathBuf> {
+    let mut search = platform::content_search_path(install_root, game, client);
+    if !search.contains(&install.game_directory) {
+        search.push(install.game_directory.clone());
+    }
+    search
 }
 
 fn classified(server: &Server, index: &MapIndex) -> BrowserServer {
@@ -1123,18 +1241,18 @@ fn describe_non_result(reason: &NonResultReason) -> (&'static str, Option<String
 
 #[tauri::command]
 async fn preview_join(
-    path: String,
+    session: Session,
     address: String,
-    engine: EngineChoice,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<JoinPreview, String> {
     let server = find_server(&state, &address)?;
-    let preview = build_preview(&path, server, engine, Some(&app)).await?;
+    let preview = build_preview(&session, server, Some(&app)).await?;
     if let Ok(mut cache) = state.preview.lock() {
         *cache = Some(CachedPreview {
-            install_root: PathBuf::from(&path),
-            engine,
+            install_root: PathBuf::from(&session.path),
+            engine: session.engine,
+            game: session.game,
             preview: preview.clone(),
         });
     }
@@ -1143,18 +1261,17 @@ async fn preview_join(
 
 #[tauri::command]
 async fn install_and_launch(
-    path: String,
+    session: Session,
     address: String,
-    engine: EngineChoice,
     selected_candidate_ids: Vec<u64>,
     accept_incomplete: bool,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<JoinResult, String> {
     let server = find_server(&state, &address)?;
-    let preview = match take_cached_preview(&state, &path, &address, engine) {
+    let preview = match take_cached_preview(&state, &session, &address) {
         Some(preview) => preview,
-        None => build_preview(&path, server.clone(), engine, Some(&app)).await?,
+        None => build_preview(&session, server.clone(), Some(&app)).await?,
     };
     let (installed, failures) = match &preview.catalogue {
         None => (Vec::new(), Vec::new()),
@@ -1169,21 +1286,30 @@ async fn install_and_launch(
             .await?
         }
     };
-    let index = MapIndex::scan(&preview.game_directory).map_err(|error| error.to_string())?;
+    // Re-index the whole search path, not just the directory written to: the gate below asks
+    // whether the engine can now find the map, and the engine reads all of it. The destination is
+    // the preview's, not a fresh probe — the files went where the download put them, and that is
+    // what gets reported (H8).
+    let install_target = platform::InstallTarget {
+        game_directory: preview.game_directory.clone(),
+        used_home_fallback: preview.used_home_fallback,
+    };
+    let index = reindex(&session, &install_target)?;
     let assessment =
         reveille_core::join::classify_server(&index, &server, preview.catalogue.as_ref());
     let outcome = if let Some(reason) = launch_refusal(&assessment, accept_incomplete) {
         LaunchOutcome::Refused { reason }
     } else {
-        launch(&path, preview.address, engine)?
+        launch(&session, preview.address)?
     };
     Ok(JoinResult {
         assessment,
         installed,
         failures,
-        game_directory: preview.game_directory,
-        used_home_fallback: preview.used_home_fallback,
-        engine,
+        game_directory: install_target.game_directory,
+        used_home_fallback: install_target.used_home_fallback,
+        engine: session.engine,
+        game: session.game,
         outcome,
     })
 }
@@ -1268,16 +1394,12 @@ async fn install_shopping_list(
 }
 
 /// Start the client the detected install actually provides, connected to `address`.
-fn launch(
-    path: &str,
-    address: SocketAddrV4,
-    engine: EngineChoice,
-) -> Result<LaunchOutcome, String> {
-    let installation = install::identify(path).map_err(|error| error.to_string())?;
-    platform::engine::resolve_choice(&installation.root, Some(engine))
+fn launch(session: &Session, address: SocketAddrV4) -> Result<LaunchOutcome, String> {
+    let installation = install::identify(&session.path).map_err(|error| error.to_string())?;
+    platform::engine::resolve_choice(&installation.root, Some(session.engine))
         .map_err(|error| error.to_string())?;
-    let kind = platform::ClientKind::from(engine);
-    let profile = LaunchProfile::new(TargetGame::AlliedAssault);
+    let kind = platform::ClientKind::from(session.engine);
+    let profile = LaunchProfile::new(session.game);
     let program = platform::default_client(&installation.root, profile.target, kind)
         .to_string_lossy()
         .into_owned();
@@ -1320,20 +1442,20 @@ fn launch_refusal(assessment: &CompatibilityAssessment, accept_incomplete: bool)
 
 fn take_cached_preview(
     state: &tauri::State<'_, AppState>,
-    path: &str,
+    session: &Session,
     address: &str,
-    engine: EngineChoice,
 ) -> Option<JoinPreview> {
     let mut cache = state.preview.lock().ok()?;
     let usable = cache.as_ref().is_some_and(|cached| {
-        preview_cache_matches(
-            &cached.install_root,
-            cached.preview.address,
-            cached.engine,
-            Path::new(path),
-            address,
-            engine,
-        )
+        cached.game == session.game
+            && preview_cache_matches(
+                &cached.install_root,
+                cached.preview.address,
+                cached.engine,
+                Path::new(&session.path),
+                address,
+                session.engine,
+            )
     });
     if !usable {
         return None;
@@ -1373,12 +1495,11 @@ fn find_server(state: &tauri::State<'_, AppState>, address: &str) -> Result<Serv
 }
 
 async fn build_preview(
-    path: &str,
+    session: &Session,
     server: Server,
-    engine: EngineChoice,
     app: Option<&tauri::AppHandle>,
 ) -> Result<JoinPreview, String> {
-    let (target, index) = installed_maps(path, engine)?;
+    let (install_target, index) = installed_maps(session)?;
     let first = reveille_core::join::classify_server(&index, &server, None);
     let wanted = first.preflight.as_ref().map_or_else(Vec::new, wanted_maps);
     let address = SocketAddrV4::new(server.endpoint.address, server.game_port.get());
@@ -1416,9 +1537,10 @@ async fn build_preview(
         server,
         assessment,
         catalogue,
-        game_directory: target.game_directory,
-        used_home_fallback: target.used_home_fallback,
-        engine,
+        game_directory: install_target.game_directory,
+        used_home_fallback: install_target.used_home_fallback,
+        engine: session.engine,
+        game: session.game,
     })
 }
 
@@ -1555,10 +1677,11 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        AppState, MasterEndpoint, OpenMohaaFailure, OpenMohaaFailureKind, OpenMohaaInstalledBuild,
-        QueryPort, Server, cache_openmohaa_offer, cached_openmohaa_offer,
-        installed_openmohaa_build, launch_refusal, merge_checked_server, openmohaa_client_path,
-        preview_cache_matches, record_openmohaa_install,
+        AppState, EngineChoice, MasterEndpoint, OpenMohaaFailure, OpenMohaaFailureKind,
+        OpenMohaaInstalledBuild, QueryPort, Server, Session, TargetGame, answered_for_another_game,
+        cache_openmohaa_offer, cached_openmohaa_offer, installed_maps, installed_openmohaa_build,
+        launch_refusal, merge_checked_server, openmohaa_client_path, preview_cache_matches,
+        record_openmohaa_install,
     };
 
     fn assessment(
@@ -1579,6 +1702,61 @@ mod tests {
             }),
             current_map,
         }
+    }
+
+    #[test]
+    fn the_session_payload_matches_what_the_shell_sends() {
+        // `lib/api.js` sends `{ session: { path, engine, game } }`, and both enums travel as the
+        // snake_case names the rest of the payloads already use. A rename on either side is a
+        // silent "invalid args" on every command, so it is pinned here rather than found by hand.
+        let session: Session = serde_json::from_str(
+            r#"{"path":"D:\\Games\\MOHAA","engine":"openmohaa","game":"breakthrough"}"#,
+        )
+        .expect("the shell's session payload");
+
+        assert_eq!(session.path, r"D:\Games\MOHAA");
+        assert_eq!(session.engine, EngineChoice::Openmohaa);
+        assert_eq!(session.game, TargetGame::Breakthrough);
+    }
+
+    #[test]
+    fn a_game_the_folder_has_no_files_for_is_refused_before_anything_is_probed() {
+        let temporary = TempDir::new().expect("temporary directory");
+        fs::create_dir(temporary.path().join("main")).expect("main directory");
+        fs::write(temporary.path().join("openmohaa.exe"), []).expect("client marker");
+        let path = temporary.path().to_string_lossy().into_owned();
+
+        // Allied Assault is what this folder has, and it indexes.
+        installed_maps(&Session {
+            path: path.clone(),
+            engine: EngineChoice::Openmohaa,
+            game: TargetGame::AlliedAssault,
+        })
+        .expect("the base game indexes");
+
+        // Spearhead is not, and saying so beats an empty map index that would report every map
+        // on the server as missing. The message names the game, never the engine's directory:
+        // `mainta` is what the check looked at and is not something a player can act on.
+        let refusal = installed_maps(&Session {
+            path: path.clone(),
+            engine: EngineChoice::Openmohaa,
+            game: TargetGame::Spearhead,
+        })
+        .expect_err("an absent expansion is refused");
+        assert!(refusal.contains("Spearhead"), "{refusal}");
+        assert!(!refusal.contains("mainta"), "{refusal}");
+
+        // "Before anything is probed" is the load-bearing half: this folder has no retail
+        // executable either, so asking for Original as well proves which check runs first. A
+        // writability probe or a home fallback must never happen for a game that was never
+        // runnable from this folder.
+        let refusal = installed_maps(&Session {
+            path,
+            engine: EngineChoice::Original,
+            game: TargetGame::Spearhead,
+        })
+        .expect_err("an absent expansion is refused whatever the engine");
+        assert!(refusal.contains("Spearhead"), "{refusal}");
     }
 
     #[test]
@@ -1671,6 +1849,7 @@ mod tests {
         let installation = reveille_core::install::Installation {
             root: Path::new(r"C:\Games\MOHAA").to_path_buf(),
             products: vec![Product::AlliedAssault],
+            playable: vec![Product::AlliedAssault],
             binaries: Vec::new(),
             identification: IdentificationMethod::DataDirectoriesOnly,
         };
@@ -1786,6 +1965,7 @@ mod tests {
             version: None,
             protocol: None,
             current_map: None,
+            game_type: None,
             rotation: Vec::new(),
             allow_download: None,
             map_checksum: None,
@@ -1799,6 +1979,138 @@ mod tests {
             pure: None,
             status_round_trip: reveille_core::discovery::RoundTripMillis::new(12),
         }
+    }
+
+    #[test]
+    fn a_checked_server_from_another_game_is_named_rather_than_listed() {
+        let mut server = probed("10.0.0.1", 12300, 12203, "a Spearhead server");
+        server.game_name = Some("mohaas".to_owned());
+
+        // Browsing Spearhead, this is an ordinary row.
+        assert_eq!(
+            answered_for_another_game(&server, TargetGame::Spearhead),
+            None
+        );
+        // Browsing Allied Assault, it answered — for something this session cannot join.
+        assert_eq!(
+            answered_for_another_game(&server, TargetGame::AlliedAssault),
+            Some(TargetGame::Spearhead)
+        );
+
+        // A server that publishes no family is not guessed about. The sweep would have listed it,
+        // and so does a check.
+        server.game_name = None;
+        assert_eq!(
+            answered_for_another_game(&server, TargetGame::AlliedAssault),
+            None
+        );
+        // Neither is one whose family is not a MOHAA family at all.
+        server.game_name = Some("quake3".to_owned());
+        assert_eq!(
+            answered_for_another_game(&server, TargetGame::AlliedAssault),
+            None
+        );
+    }
+
+    #[test]
+    fn the_shell_sends_the_session_to_every_command_that_needs_one() {
+        // The Rust signatures and the JavaScript that calls them are one contract with two halves
+        // in different languages, and no compiler spans both. A rename on either side is an
+        // "invalid args" failure on every server-facing command, found by hand, at runtime.
+        let api = include_str!("../ui/lib/api.js");
+
+        for command in [
+            "browse_servers",
+            "check_server",
+            "preview_join",
+            "install_and_launch",
+        ] {
+            let call = format!(r#"invoke("{command}", {{ session"#);
+            assert!(
+                api.contains(&call),
+                "ui/lib/api.js must pass `session` to {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_shell_sweeps_again_when_the_session_the_list_was_swept_for_changed() {
+        // A text check, and it is what is available: the shell has no test runner, and the failure
+        // it guards is invisible — the wrong game's servers under the right heading, with no error
+        // and nothing on screen to contradict them (H12). The regression it catches is a real one
+        // that shipped: `enterServers` swept only when the table was empty, so returning from setup
+        // with a different game kept the list from the game just left.
+        let app = include_str!("../ui/app.js");
+
+        assert!(
+            app.contains("next.listSession = swept;"),
+            "ui/app.js: refresh must record the session its rows were swept for"
+        );
+        assert!(
+            app.contains("if (!state.servers.length || !listIsForCurrentSession()) refresh();"),
+            "ui/app.js: enterServers must sweep again when the list is for another session"
+        );
+
+        // The comparison has to cover all three: the game decides which servers exist, the folder
+        // and the engine decide the search path their compatibility was judged against.
+        let store = include_str!("../ui/lib/store.js");
+        assert!(
+            store.contains(
+                "swept.path === now.path && swept.engine === now.engine && swept.game === now.game"
+            ),
+            "ui/lib/store.js: listIsForCurrentSession must compare path, engine and game"
+        );
+    }
+
+    #[test]
+    fn a_check_that_got_no_answer_drops_the_row_it_was_checking() {
+        // The same kind of text check, for the same reason: the shell has no test runner, and the
+        // failure is silent. A player presses "Check again" precisely to find out whether the
+        // figures still hold, and a server that has stopped answering while keeping its client
+        // count, map and round trip on screen answers that question with a lie (H12).
+        let app = include_str!("../ui/app.js");
+
+        assert!(
+            app.contains(
+                "next.servers = next.servers.filter((row) => row.address !== entry.address);"
+            ),
+            "ui/app.js: a check that returned no row must drop any live row for the address it asked"
+        );
+        assert!(
+            app.contains("next.checkedAt.set(result.row.address, clockTime());"),
+            "ui/app.js: a check that answered must record when it measured the row"
+        );
+    }
+
+    #[test]
+    fn a_check_carries_forward_what_it_knows_about_a_row_already_dropped() {
+        // Found by review, and it made the one control on screen destroy the pane holding it: the
+        // second "Check again" on a dropped server recomputed the remembered name from a list the
+        // first check had already emptied, so the pane fell back to "No server selected".
+        let app = include_str!("../ui/app.js");
+
+        assert!(
+            app.contains("(state.checks.get(entry.address)?.dropped ?? null)"),
+            "ui/app.js: a check on a row already dropped must keep what the earlier check recorded"
+        );
+    }
+
+    #[test]
+    fn one_check_does_not_cancel_another() {
+        // Also found by review. A single token bumped per call meant re-checking one server
+        // abandoned the favourites batch mid-way and left the row it was probing reading
+        // "Checking…" for a request nobody was waiting on. The token counts list generations —
+        // a sweep and a game switch — not calls.
+        let app = include_str!("../ui/app.js");
+
+        assert!(
+            app.contains("const generation = checkGeneration;"),
+            "ui/app.js: check must capture the generation, not allocate a new token per call"
+        );
+        assert!(
+            app.contains("  checkGeneration += 1;\n  const swept = session();"),
+            "ui/app.js: a sweep must retire the checks still in flight against the old list"
+        );
     }
 
     #[test]

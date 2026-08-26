@@ -8,12 +8,29 @@ import { favourites, history, historyByAddress } from "./bookmarks.js";
 const INSTALL_KEY = "reveille.install";
 const FILTERS_KEY = "reveille.filters";
 const ENGINES_KEY = "reveille.engines";
+const GAMES_KEY = "reveille.games";
+
+/** The three games, as the Rust side spells them. Also how `Installation.products` spells them. */
+export const GAMES = ["allied_assault", "spearhead", "breakthrough"];
+
+export const GAME_LABELS = {
+  allied_assault: "Allied Assault",
+  spearhead: "Spearhead",
+  breakthrough: "Breakthrough",
+};
 
 export const state = {
   /** The identified installation, or null while first run is unresolved. */
   install: null,
   /** Explicit engine choice for this installation. */
   engine: null,
+  /**
+   * Which of the three games this session is browsing and joining.
+   *
+   * It is not a filter over one list: each game has its own master registration, its own servers,
+   * and its own search path on disk, so changing it starts a different sweep.
+   */
+  game: "allied_assault",
 
   /** The folder accepted on a previous run, if any. */
   rememberedInstall: null,
@@ -22,6 +39,16 @@ export const state = {
   servers: [],
   summary: null,
   nonResults: [],
+
+  /**
+   * The session the rows on screen were swept for, or null before the first sweep.
+   *
+   * The list is not a view of "the servers": it is the answer to one particular question — this
+   * folder, this engine, this game. Nothing on screen says which, so a list left over from a
+   * session that has since changed would read as a current answer to the new question. Keeping
+   * what it was swept for is what lets a returning session tell the difference.
+   */
+  listSession: null,
 
   /** Sweep progress. `running` drives the toolbar; `probed`/`inspected` the meter. */
   browse: {
@@ -47,13 +74,21 @@ export const state = {
   /** Candidate ids the player picked for ambiguous maps, keyed by map name. */
   choices: new Map(),
 
-  /** Install run in progress, or null. */
+  /** Install run in progress, or null. Downloads only — see `joining` for the whole command. */
   installRun: null,
+  /**
+   * Whether `install_and_launch` is running.
+   *
+   * Wider than `installRun`, which is null when a compatible server has nothing to fetch. The join
+   * command owns the detail pane for its whole length, downloads or not, so this is what the pane
+   * and the one-server check read.
+   */
+  joining: false,
   joinResult: null,
   joinError: null,
 
   /** View state. */
-  filters: { query: "", hasPeople: false, hideBlocked: false },
+  filters: { query: "", hasPeople: false },
   sort: { column: "clients", direction: "desc" },
   /** Which population the table lists: every answering server, the starred ones, or the launched ones. */
   scope: "all",
@@ -64,6 +99,15 @@ export const state = {
    * in `servers` or the recorded reason it did not answer sits here.
    */
   checks: new Map(),
+  /**
+   * When a single-server check last measured each address, as a clock time.
+   *
+   * Only the servers a check re-asked on their own are in here, one entry per re-check rather
+   * than one per row. A row still carrying the sweep's own figures has no entry, and the pane
+   * words it as the check it came from rather than as a measurement of that one server: probes
+   * stream in across a whole sweep, so its finish time is not when any particular row answered.
+   */
+  checkedAt: new Map(),
   /** Sweep completion the favourites auto-check has already run for, so it runs once. */
   autoCheckedAt: null,
 };
@@ -122,6 +166,71 @@ export function recallEngine(root) {
   }
 }
 
+/**
+ * Remember the game per install folder, like the engine.
+ *
+ * Per folder rather than globally: a second installation may not have the same expansions, and a
+ * remembered game its data directories cannot serve would be a session that fails on its first
+ * command.
+ */
+export function rememberGame(root, game) {
+  try {
+    const choices = JSON.parse(localStorage.getItem(GAMES_KEY) ?? "{}");
+    choices[root] = game;
+    localStorage.setItem(GAMES_KEY, JSON.stringify(choices));
+  } catch {
+    // The explicit in-memory choice still works for this session.
+  }
+}
+
+export function recallGame(root) {
+  try {
+    const game = JSON.parse(localStorage.getItem(GAMES_KEY) ?? "{}")[root];
+    return GAMES.includes(game) ? game : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The games an install can actually run, which is not the same as the products detected in it:
+ * an expansion needs the base game underneath it, and the Rust side decides that (rules H13/H14).
+ */
+export function playableGames(install) {
+  return install?.playable ?? [];
+}
+
+/**
+ * The game a session should open on: the remembered one when this install can still run it,
+ * otherwise the first game it can.
+ */
+export function defaultGame(install) {
+  const games = playableGames(install);
+  const remembered = install ? recallGame(install.root) : null;
+  if (remembered && games.includes(remembered)) return remembered;
+  return games[0] ?? "allied_assault";
+}
+
+/** The three facts every server-facing command needs. */
+export function session() {
+  return { path: state.install.root, engine: state.engine, game: state.game };
+}
+
+/**
+ * Whether the rows on screen were swept for the session in force now.
+ *
+ * All three facts count. The game decides which master registration was asked and which servers
+ * exist at all; the folder and the engine decide the search path every row's compatibility was
+ * judged against. A change to any of them makes the list an answer to a question no longer being
+ * asked.
+ */
+export function listIsForCurrentSession() {
+  const swept = state.listSession;
+  if (!swept || !state.install) return false;
+  const now = session();
+  return swept.path === now.path && swept.engine === now.engine && swept.game === now.game;
+}
+
 export function saveFilters() {
   try {
     localStorage.setItem(
@@ -137,7 +246,7 @@ export function loadFilters() {
   try {
     const saved = JSON.parse(localStorage.getItem(FILTERS_KEY) ?? "null");
     if (!saved) return;
-    state.filters = { query: "", hasPeople: !!saved.hasPeople, hideBlocked: !!saved.hideBlocked };
+    state.filters = { query: "", hasPeople: !!saved.hasPeople };
     if (saved.sort?.column) state.sort = saved.sort;
     if (SCOPES.includes(saved.scope)) state.scope = saved.scope;
   } catch {
@@ -153,6 +262,9 @@ const SORTERS = {
   name: (row) => row.server.hostname.toLowerCase(),
   clients: (row) => row.server.occupancy?.clients_reported ?? -1,
   map: (row) => (row.server.current_map ?? "").toLowerCase(),
+  // A server that publishes no gametype sorts to the end of an ascending sort rather than to the
+  // top with the empty string, where a run of blanks would hide the modes the player is scanning.
+  mode: (row) => (row.server.game_type ?? "￿").toLowerCase(),
   // Every listed server answered, so a round trip always exists. The fallback sorts a server
   // that somehow lacks one to the far end rather than pretending it is instant.
   ping: (row) => row.server.status_round_trip ?? Number.MAX_SAFE_INTEGER,
@@ -161,12 +273,11 @@ const SORTERS = {
   launched: (row, launches) => launches.get(row.address)?.lastLaunchedAt ?? "",
 };
 
-/** Whether a live row survives the search box and the two toolbar toggles. */
+/** Whether a live row survives the search box and the toolbar toggle. */
 function matchesFilters(row) {
   const query = state.filters.query.trim().toLowerCase();
   if (query && !row.server.hostname.toLowerCase().includes(query)) return false;
   if (state.filters.hasPeople && (row.server.occupancy?.clients_reported ?? 0) < 1) return false;
-  if (state.filters.hideBlocked && row.compatibility.state.state === "no_source") return false;
   return true;
 }
 
@@ -209,13 +320,13 @@ export function scopedRows() {
   for (const entry of remembered) {
     const row = live.get(entry.address);
     if (row) {
-      // The toolbar toggles are visible and pressed, so they apply here too. Quietly ignoring
-      // one in this scope would make the controls mean different things in different views.
+      // The toolbar toggle is visible and pressed, so it applies here too. Quietly ignoring it
+      // in this scope would make the control mean different things in different views.
       if (matchesFilters(row)) rows.push(row);
       continue;
     }
-    // An absent entry has only a remembered name and an address to match on, and neither toggle
-    // has anything to test: there are no figures.
+    // An absent entry has only a remembered name and an address to match on, and the toggle has
+    // nothing to test: there are no figures.
     if (query && !entry.hostname.toLowerCase().includes(query) && !entry.address.includes(query)) {
       continue;
     }
@@ -225,6 +336,22 @@ export function scopedRows() {
     ...sortRows(rows).map((row) => ({ kind: "live", address: row.address, row })),
     ...absent.map((entry) => ({ kind: "absent", address: entry.address, entry })),
   ];
+}
+
+/**
+ * Whether one server may be asked again right now.
+ *
+ * Not while a sweep is running — that is already re-asking every server in the list, this one
+ * included. Not while a join is running — the pane belongs to that command, and a check that came
+ * back empty would drop the row its progress is drawn against. And not while this address already
+ * has a request in flight.
+ *
+ * One question, read by both the control and the handler behind it, so the two cannot drift into
+ * disagreeing about when the control works.
+ */
+export function canRecheck(address) {
+  if (state.browse.running || state.joining) return false;
+  return state.checks.get(address)?.status !== "checking";
 }
 
 export function selectedRow() {

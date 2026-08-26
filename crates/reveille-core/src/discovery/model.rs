@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::Ipv4Addr;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::bsp::Checksum;
 
@@ -122,7 +122,7 @@ impl ReportedOccupancy {
 }
 
 /// A game family registered with the master server.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetGame {
     /// Medal of Honor: Allied Assault.
@@ -220,6 +220,13 @@ pub struct Server {
     pub protocol: Option<String>,
     /// Current map spelling published by the server.
     pub current_map: Option<String>,
+    /// Gametype label published by the server, in the server's own spelling.
+    ///
+    /// The engine's own values are `Free-For-All`, `Team-Match`, `Round-Based-Match`,
+    /// `Objective-Match`, `Tug-of-War`, `Liberation` and `Multiplayer` (`gamecvars.cpp:560-578`), but
+    /// this is a plain server cvar and a mod may publish anything, so it is kept as reported and
+    /// never mapped onto a fixed set.
+    pub game_type: Option<String>,
     /// Full `sv_maplist`, preserving server spelling.
     pub rotation: Vec<String>,
     /// Download permission bitmask, not a boolean.

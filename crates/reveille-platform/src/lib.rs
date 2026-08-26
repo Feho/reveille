@@ -15,7 +15,7 @@ use std::process::Command;
 
 use reveille_core::discovery::TargetGame;
 use reveille_core::engine::EngineChoice;
-use reveille_core::join::{LaunchCommand, LaunchDialect};
+use reveille_core::join::{LaunchCommand, LaunchDialect, LaunchProfile};
 #[cfg(any(windows, test))]
 use reveille_core::platform::openmohaa;
 use reveille_core::platform::openmohaa::ClientActivity;
@@ -203,6 +203,75 @@ pub fn default_client(install_root: &Path, target: TargetGame, client: ClientKin
     install_root.join(filename)
 }
 
+/// Directory name `OpenMoHAA` appends to `%APPDATA%` for its home path.
+///
+/// `Sys_DefaultHomePath` (`sys_win32.c:97-120`) appends `com_homepath`, which is empty for a
+/// non-demo build (`common.c:1771`), and otherwise `HOMEPATH_NAME` — `"openmohaa"`
+/// (`q_shared.h:81`). The per-product `HOMEPATH_NAME_WIN_MOH*` defines beside it name `moh`,
+/// `mohta` and `mohtt` but are referenced nowhere in the engine; one home path serves all three
+/// target games, with `main`, `mainta` and `maintt` inside it.
+const OPENMOHAA_HOME_DIRECTORY: &str = "openmohaa";
+
+/// `OpenMoHAA`'s home path on this machine, when the environment names one.
+///
+/// The engine searches this path in addition to the installation, whether or not Reveille writes
+/// there, and it wins over the installation for any file present in both.
+#[must_use]
+pub fn openmohaa_home_root() -> Option<PathBuf> {
+    env::var_os("APPDATA").map(|app_data| PathBuf::from(app_data).join(OPENMOHAA_HOME_DIRECTORY))
+}
+
+/// The directories one target game reads **from the selected installation**, lowest precedence
+/// first.
+///
+/// Two things are composed here. `LaunchProfile::search_directories` gives the game directories
+/// — `main` alone, or `main` then the expansion's — and `FS_AddGameDirectories`
+/// (`files.cpp:3246-3257`) adds each of them under every base path, the home path last, so the
+/// home copy of a directory outranks the installed one. Directories that do not exist are left
+/// out rather than reported: the engine simply finds nothing in them.
+///
+/// **This is the selected installation and the home path, not every path the engine can read.**
+/// `FS_InitPathVars` (`files.cpp:3562-3573`) also registers `fs_steampath`, `fs_gogpath` and
+/// `fs_microsoftstorepath`, and `FS_Startup` adds a non-empty `fs_game` on top
+/// (`files.cpp:3647-3650`). A map that exists only in a *second*, unselected installation, or
+/// only inside a server-published mod directory, is therefore loadable by the engine and absent
+/// from this list — Reveille would report it missing. Recorded as a known limit rather than
+/// guessed at: modelling the other roots means deciding which of several installations the
+/// player meant, which is the question setup already asked them.
+#[must_use]
+pub fn content_search_path(
+    install_root: &Path,
+    target: TargetGame,
+    client: ClientKind,
+) -> Vec<PathBuf> {
+    // Retail and Reborn read no home path: `fs_homepath` is an OpenMoHAA-era addition.
+    let home = (client == ClientKind::OpenMohaa)
+        .then(openmohaa_home_root)
+        .flatten();
+    search_path_with_home(install_root, target, home.as_deref())
+}
+
+/// The chain itself, with the home root supplied rather than read from the environment, so the
+/// ordering can be tested without depending on what exists on the machine running the test.
+fn search_path_with_home(
+    install_root: &Path,
+    target: TargetGame,
+    home: Option<&Path>,
+) -> Vec<PathBuf> {
+    LaunchProfile::new(target)
+        .search_directories()
+        .iter()
+        .flat_map(|directory| {
+            [
+                Some(install_root.join(directory)),
+                home.map(|home| home.join(directory)),
+            ]
+        })
+        .flatten()
+        .filter(|directory| directory.is_dir())
+        .collect()
+}
+
 /// Writable game directory selected for downloaded content.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InstallTarget {
@@ -234,8 +303,9 @@ pub fn resolve_install_target(
             source,
         }),
         Err(_) => {
-            let app_data = env::var_os("APPDATA").ok_or(PlatformError::MissingAppData)?;
-            let fallback = PathBuf::from(app_data).join("moh").join(data_directory);
+            let fallback = openmohaa_home_root()
+                .ok_or(PlatformError::MissingAppData)?
+                .join(data_directory);
             fs::create_dir_all(&fallback).map_err(|source| PlatformError::HomeFallback {
                 path: fallback.clone(),
                 source,
@@ -300,9 +370,24 @@ pub fn launch_client(command: &LaunchCommand, client: ClientKind) -> Result<Chil
     {
         process.current_dir(parent);
     }
-    process.spawn().map_err(|source| PlatformError::Launch {
-        program: program.to_path_buf(),
-        source,
+    // Retail and Reborn select the product by executable, so an install without the expansion's
+    // client has no file to spawn at all — the ordinary case for a folder that has Allied
+    // Assault and not Spearhead, and worth naming rather than reporting as a generic failure.
+    // The classification happens *after* the spawn attempt, never before it: `Command` resolves a
+    // bare program name against `PATH`, which `Path::is_file` does not, and the CLI's default
+    // client is the bare name `openmohaa`.
+    process.spawn().map_err(|source| {
+        if source.kind() == io::ErrorKind::NotFound {
+            PlatformError::ClientMissing {
+                program: program.to_path_buf(),
+                target: command.profile.target,
+            }
+        } else {
+            PlatformError::Launch {
+                program: program.to_path_buf(),
+                source,
+            }
+        }
     })
 }
 
@@ -329,6 +414,14 @@ pub enum PlatformError {
         /// Creation or writability failure.
         #[source]
         source: io::Error,
+    },
+    /// The product's client executable is not in the installation.
+    #[error("{target} cannot start because its game program was not found at {program}")]
+    ClientMissing {
+        /// Executable the selected product and engine resolve to.
+        program: PathBuf,
+        /// Product whose client is missing.
+        target: TargetGame,
     },
     /// Selected executable could not be started.
     #[error("could not launch client {program}")]
@@ -438,6 +531,118 @@ mod tests {
             root.join("MOHAA.exe")
         );
         assert_eq!(ClientKind::Reborn.dialect(), LaunchDialect::Retail);
+    }
+
+    #[test]
+    fn an_expansion_search_path_keeps_main_underneath_it() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        fs::create_dir(root.join("main")).expect("main directory");
+        fs::create_dir(root.join("mainta")).expect("mainta directory");
+
+        assert_eq!(
+            content_search_path(root, TargetGame::AlliedAssault, ClientKind::Retail),
+            [root.join("main")]
+        );
+        // Lowest precedence first: `mainta` is added after `main` and therefore searched before it.
+        assert_eq!(
+            content_search_path(root, TargetGame::Spearhead, ClientKind::Retail),
+            [root.join("main"), root.join("mainta")]
+        );
+        // Breakthrough has no `maintt` here, and a directory that does not exist is left out
+        // rather than reported: the engine simply finds nothing in it.
+        assert_eq!(
+            content_search_path(root, TargetGame::Breakthrough, ClientKind::Retail),
+            [root.join("main")]
+        );
+    }
+
+    #[test]
+    fn the_home_copy_of_a_directory_outranks_the_installed_one() {
+        // The home root is supplied rather than read from `%APPDATA%`, so this asserts the engine
+        // ordering itself instead of whatever happens to exist on the machine running it.
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path().join("install");
+        let home = temporary.path().join("home");
+        for directory in [&root, &home] {
+            fs::create_dir_all(directory.join("main")).expect("main directory");
+            fs::create_dir_all(directory.join("mainta")).expect("mainta directory");
+        }
+
+        // Lowest precedence first, so this reads: main, home main, mainta, home mainta — and the
+        // engine loads the last of them first. A later game directory outranks every path of an
+        // earlier one (`files.cpp:3640-3645` with `3246-3257`).
+        assert_eq!(
+            search_path_with_home(&root, TargetGame::Spearhead, Some(&home)),
+            [
+                root.join("main"),
+                home.join("main"),
+                root.join("mainta"),
+                home.join("mainta"),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_openmohaa_reads_a_home_path() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        fs::create_dir(root.join("main")).expect("main directory");
+
+        // Retail and Reborn predate the home path split, so the choice of client decides whether
+        // one is consulted at all. `openmohaa_home_root` is environment-dependent; what is
+        // asserted here is only that the retail path never grows beyond the installation.
+        assert_eq!(
+            content_search_path(root, TargetGame::AlliedAssault, ClientKind::Retail),
+            [root.join("main")]
+        );
+        assert!(
+            content_search_path(root, TargetGame::AlliedAssault, ClientKind::OpenMohaa)
+                .starts_with(&[root.join("main")])
+        );
+    }
+
+    #[test]
+    fn a_bare_program_name_is_resolved_rather_than_treated_as_a_path() {
+        // `Command` resolves a bare name against `PATH`; `Path::is_file` does not. The CLI's
+        // default join client is the bare name `openmohaa`, so a pre-spawn path check refuses a
+        // client that is installed. This launches a program that is certainly on `PATH` and
+        // certainly not a file in the working directory, and kills it immediately; what is being
+        // asserted is that it started at all.
+        let program = if cfg!(windows) { "cmd" } else { "sh" };
+        let command = LaunchCommand::new(
+            program,
+            LaunchProfile::new(TargetGame::AlliedAssault),
+            reveille_core::join::FsGame::new("").expect("empty mod directory"),
+            std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(203, 0, 113, 7), 12_203),
+        )
+        .expect("launch command");
+
+        let mut child = launch_client(&command, ClientKind::Retail)
+            .expect("a program on PATH is not a missing client");
+        drop(child.kill());
+        drop(child.wait());
+    }
+
+    #[test]
+    fn an_install_without_the_expansion_client_says_which_program_is_missing() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let program = default_client(temporary.path(), TargetGame::Spearhead, ClientKind::Retail);
+        let command = LaunchCommand::new(
+            program.to_string_lossy().into_owned(),
+            LaunchProfile::new(TargetGame::Spearhead),
+            reveille_core::join::FsGame::new("").expect("empty mod directory"),
+            std::net::SocketAddrV4::new(std::net::Ipv4Addr::new(203, 0, 113, 7), 12_203),
+        )
+        .expect("launch command");
+
+        assert!(matches!(
+            launch_client(&command, ClientKind::Retail),
+            Err(PlatformError::ClientMissing {
+                target: TargetGame::Spearhead,
+                ..
+            })
+        ));
     }
 
     #[test]

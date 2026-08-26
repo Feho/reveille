@@ -442,6 +442,11 @@ fn build_server(
         version,
         protocol: nonempty(status, "protocol"),
         current_map: nonempty(status, "mapname").or_else(|| nonempty(gamespy, "mapname")),
+        // gamecvars.cpp:499 registers g_gametypestring as CVAR_SERVERINFO, so sv_main.c:524
+        // carries it verbatim in the getstatus reply; sv_gamespy.c:163 publishes the same string
+        // as the GameSpy `gametype` field. The numeric g_gametype is a different quantity and is
+        // never substituted for it.
+        game_type: nonempty(status, "g_gametypestring").or_else(|| nonempty(gamespy, "gametype")),
         rotation: status
             .get("sv_maplist")
             .map(|rotation| rotation.split_whitespace().map(str::to_owned).collect())
@@ -697,6 +702,7 @@ mod tests {
             ("sv_maxPing".to_owned(), "250".to_owned()),
             ("g_allowjointime".to_owned(), "10".to_owned()),
             ("sv_privateClients".to_owned(), "2".to_owned()),
+            ("g_gametypestring".to_owned(), "Objective-Match".to_owned()),
         ]);
 
         let server = build_server(
@@ -758,6 +764,52 @@ mod tests {
                 .map(crate::discovery::ReservedSlots::get),
             Some(2)
         );
+        assert_eq!(server.game_type.as_deref(), Some("Objective-Match"));
+    }
+
+    #[test]
+    fn falls_back_to_the_gamespy_gametype_when_serverinfo_omits_it() {
+        let endpoint = MasterEndpoint {
+            address: Ipv4Addr::new(203, 0, 113, 11),
+            query_port: QueryPort::new(12_300),
+        };
+        // sv_gamespy.c:163 publishes g_gametypestring under the shorter `gametype` key.
+        let gamespy = FieldMap::from([
+            ("hostport".to_owned(), "12203".to_owned()),
+            ("gametype".to_owned(), "Tug-of-War".to_owned()),
+        ]);
+        let status = FieldMap::from([("protocol".to_owned(), "8".to_owned())]);
+
+        let server = build_server(
+            endpoint,
+            game_port_from_gamespy(&gamespy).expect("reply carries hostport"),
+            &gamespy,
+            &status,
+            MEASURED,
+        );
+
+        assert_eq!(server.game_type.as_deref(), Some("Tug-of-War"));
+    }
+
+    #[test]
+    fn reports_no_game_type_when_neither_reply_publishes_one() {
+        let endpoint = MasterEndpoint {
+            address: Ipv4Addr::new(203, 0, 113, 12),
+            query_port: QueryPort::new(12_300),
+        };
+        let gamespy = FieldMap::from([("hostport".to_owned(), "12203".to_owned())]);
+        // sv_main.c:622 also publishes the numeric g_gametype, which is not this quantity.
+        let status = FieldMap::from([("g_gametype".to_owned(), "4".to_owned())]);
+
+        let server = build_server(
+            endpoint,
+            game_port_from_gamespy(&gamespy).expect("reply carries hostport"),
+            &gamespy,
+            &status,
+            MEASURED,
+        );
+
+        assert_eq!(server.game_type, None);
     }
 
     #[test]

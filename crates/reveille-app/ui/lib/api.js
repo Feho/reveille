@@ -6,6 +6,8 @@
 //
 // Commands (crates/reveille-app/src/main.rs):
 //   detect_install(selectedPath?)              -> Installation | null
+//     Installation.products is what is on disk; Installation.playable is what can be run — an
+//     expansion needs the base game underneath it (rules H13/H14). Offer `playable`.
 //   openmohaa_status(path, channel)            -> OpenMohaaStatus
 //   install_openmohaa(path, offerId)           -> OpenMohaaInstallResult
 //   cancel_openmohaa_install()                 -> void
@@ -13,11 +15,15 @@
 //   engine_overview(path)                      -> EngineOverview
 //   select_engine(path, engine)                -> EngineOverview
 //   install_reborn(path)                       -> RebornInstallResult
-//   browse_servers(path, engine)               -> BrowserPayload
+//   browse_servers(session)                    -> BrowserPayload
 //   cancel_browse()                            -> void
-//   check_server(path, address, queryPort, engine) -> CheckResult
-//   preview_join(path, address, engine)         -> JoinPreview
-//   install_and_launch(path, address, engine, selectedCandidateIds, acceptIncomplete) -> JoinResult
+//   check_server(session, address, queryPort)  -> CheckResult
+//   preview_join(session, address)             -> JoinPreview
+//   install_and_launch(session, address, selectedCandidateIds, acceptIncomplete) -> JoinResult
+//
+// A `session` is `{ path, engine, game }`: which game folder, which engine program, and which of
+// the three games — Allied Assault, Spearhead or Breakthrough. Every server-facing command takes
+// all three together, because a folder and an engine without a game names no search path.
 //
 // Events:
 //   reveille://browse   BrowseProgress   { registered, inspected, probed, answered, non_results, row }
@@ -47,21 +53,22 @@ export const cancelOpenMohaaInstall = () => invoke("cancel_openmohaa_install");
 
 export const pickInstallFolder = () => invoke("pick_install_folder");
 
-export const browseServers = (path, engine) => invoke("browse_servers", { path, engine });
+export const browseServers = (session) => invoke("browse_servers", { session });
 
 export const cancelBrowse = () => invoke("cancel_browse");
 
 /**
  * Probe one remembered server directly. Resolves either way: a server that did not answer comes
- * back as `{ row: null, non_result }`, never as a rejection.
+ * back as `{ row: null, non_result }`, and one that answered for another of the three games as
+ * `{ row: null, other_game }`. Never a rejection.
  */
-export const checkServer = (path, address, queryPort, engine) =>
-  invoke("check_server", { path, address, queryPort, engine });
+export const checkServer = (session, address, queryPort) =>
+  invoke("check_server", { session, address, queryPort });
 
-export const previewJoin = (path, address, engine) => invoke("preview_join", { path, address, engine });
+export const previewJoin = (session, address) => invoke("preview_join", { session, address });
 
-export const installAndLaunch = (path, address, engine, selectedCandidateIds, acceptIncomplete) =>
-  invoke("install_and_launch", { path, address, engine, selectedCandidateIds, acceptIncomplete });
+export const installAndLaunch = (session, address, selectedCandidateIds, acceptIncomplete) =>
+  invoke("install_and_launch", { session, address, selectedCandidateIds, acceptIncomplete });
 
 export const onBrowseProgress = (handler) => on("reveille://browse", handler);
 export const onPreviewProgress = (handler) => on("reveille://preview", handler);

@@ -7,7 +7,10 @@ import {
   openMohaaStatus, pickInstallFolder, selectEngine,
 } from "../lib/api.js";
 import { bytes, displayPath } from "../lib/format.js";
-import { notify, recallEngine, rememberEngine, rememberInstall, state } from "../lib/store.js";
+import {
+  GAME_LABELS, defaultGame, notify, playableGames, recallEngine, rememberEngine, rememberGame,
+  rememberInstall, state,
+} from "../lib/store.js";
 
 const PRODUCT_NAMES = { allied_assault: "Allied Assault", spearhead: "Spearhead", breakthrough: "Breakthrough" };
 const DESCRIPTIONS = {
@@ -19,7 +22,7 @@ const LABELS = { openmohaa: "OpenMoHAA", reborn: "Reborn", original: "Original g
 
 const view = {
   candidate: null, eyebrow: "First run", message: "Checking the usual locations.", busy: true,
-  error: null, manualPath: "", overview: null, selected: null, channel: "stable",
+  error: null, manualPath: "", overview: null, selected: null, channel: "stable", game: null,
   openStatus: null, openError: null, installing: null, stopping: false, progress: null, result: null,
 };
 let loadToken = 0;
@@ -45,6 +48,7 @@ function card(render, onReady) {
     el("h1", { className: "setup__title" }, view.busy ? "Looking for Allied Assault" : view.candidate ? "How do you want to run the game?" : "Show Reveille your game"),
     el("p", { className: "setup__lede" }, view.message),
     view.candidate && foundBlock(view.candidate),
+    view.candidate && gameChoice(view.candidate, render),
     view.candidate && engineChoices(view.candidate, render),
     !view.busy && !view.candidate && manualBlock(render),
     view.candidate && el("div", { className: "actions__row" },
@@ -56,7 +60,30 @@ function card(render, onReady) {
 
 function foundBlock(install) {
   const products = (install.products ?? []).map((product) => PRODUCT_NAMES[product] ?? product);
-  return el("div", { className: "setup__found" }, el("p", { className: "setup__path" }, displayPath(install.root)), el("p", { className: "quiet" }, products.length ? products.join(" · ") : "No recognised game data"));
+  return el("div", { className: "setup__found" },
+    el("p", { className: "setup__path" }, displayPath(install.root)),
+    el("p", { className: "quiet" }, products.length ? products.join(" · ") : "No recognised game data"));
+}
+
+/**
+ * Which of the three games this session opens on.
+ *
+ * Asked here, and only when the folder can run more than one, because Continue starts a search
+ * immediately: a player told to choose afterwards would find the toolbar's switch disabled while
+ * that first search ran. One question with an obvious default costs less than an unwanted sweep.
+ */
+function gameChoice(install, render) {
+  const games = playableGames(install);
+  if (games.length < 2) return false;
+  return el("fieldset", { className: "game-choice", disabled: Boolean(view.installing) },
+    el("legend", { className: "label" }, "Which game do you want to play?"),
+    games.map((game) => {
+      const id = `game-${game}`;
+      return el("span", { className: "game-choice__option" },
+        el("input", { id, type: "radio", name: "game-choice", value: game, checked: view.game === game,
+          onchange: () => { view.game = game; render(); } }),
+        el("label", { for: id }, GAME_LABELS[game] ?? game));
+    }));
 }
 
 function engineChoices(install, render) {
@@ -138,6 +165,12 @@ function installProgress(render) {
     el("button", { type: "button", className: "btn btn--ghost", disabled: view.stopping, onclick: (event) => { event.preventDefault(); void stopInstall(render); } }, view.stopping ? "Stopping…" : "Stop download"));
 }
 
+/** Take an identified folder as the candidate, keeping the game choice valid for it. */
+function adoptCandidate(install) {
+  view.candidate = install;
+  if (!playableGames(install).includes(view.game)) view.game = defaultGame(install);
+}
+
 function isInstalled(engine) { return Boolean(view.overview?.inventory?.[`${engine}_installed`]); }
 function selectedAvailable() {
   if (!view.selected || !view.overview) return false;
@@ -186,7 +219,7 @@ async function reloadAfterInstall(install, engine, render) {
   view.result = { engine }; view.installing = null; view.progress = null;
   rememberEngine(install.root, engine);
   view.overview = await engineOverview(install.root, engine); view.selected = engine;
-  view.candidate = (await detectInstall(install.root)) ?? install; render();
+  adoptCandidate((await detectInstall(install.root)) ?? install); render();
 }
 function finishInstall(render) { view.installing = null; view.stopping = false; view.progress = null; render(); }
 async function stopInstall(render) {
@@ -212,7 +245,7 @@ async function check(path, render) {
   view.busy = true; view.error = null; view.message = "Reading."; render();
   try {
     const install = await detectInstall(path);
-    if (install) { view.candidate = install; view.message = "Read from the game files on disk."; await loadOverview(install, render); }
+    if (install) { adoptCandidate(install); view.message = "Read from the game files on disk."; await loadOverview(install, render); }
     else { resetCandidate(); view.message = "No Medal of Honor installation there."; }
   } catch (error) { view.error = errorText(error); view.message = "That folder could not be read."; }
   finally { view.busy = false; render(); }
@@ -225,7 +258,7 @@ export async function autoDetect(render, onReady, { skipConfirmation = true } = 
     let install = remembered ? await safeDetect(remembered) : null;
     install ??= await detectInstall(null);
     if (install) {
-      view.candidate = install; view.manualPath = displayPath(install.root); view.message = "Read from the game files on disk.";
+      adoptCandidate(install); view.manualPath = displayPath(install.root); view.message = "Read from the game files on disk.";
       await loadOverview(install, render);
       if (skipConfirmation && remembered && install.root === remembered && selectedAvailable()) await accept(install, onReady, render);
     } else view.message = "Nothing was found automatically. Pick the folder once and Reveille remembers it.";
@@ -239,12 +272,15 @@ async function accept(install, onReady, render) {
   view.busy = true; view.error = null; render();
   try {
     view.overview = await selectEngine(install.root, view.selected);
-    state.install = install; state.engine = view.selected; rememberInstall(install.root);
-    rememberEngine(install.root, view.selected); notify(); onReady();
+    state.install = install; state.engine = view.selected;
+    state.game = view.game ?? defaultGame(install);
+    rememberInstall(install.root);
+    rememberEngine(install.root, view.selected); rememberGame(install.root, state.game);
+    notify(); onReady();
   } catch (error) { view.error = errorText(error); }
   finally { view.busy = false; render(); }
 }
 function resetCandidate() {
-  loadToken += 1; view.candidate = null; view.overview = null; view.selected = null;
+  loadToken += 1; view.candidate = null; view.overview = null; view.selected = null; view.game = null;
   view.openStatus = null; view.openError = null; view.result = null;
 }

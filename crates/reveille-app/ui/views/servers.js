@@ -15,6 +15,7 @@
 
 import { el, fill } from "../lib/dom.js";
 import {
+  gameType,
   launchedLabel,
   mapName,
   nonResultReason,
@@ -30,7 +31,15 @@ import {
   historyByAddress,
   toggleFavourite,
 } from "../lib/bookmarks.js";
-import { SCOPES, saveFilters, scopedRows, state, update } from "../lib/store.js";
+import {
+  GAME_LABELS,
+  SCOPES,
+  playableGames,
+  saveFilters,
+  scopedRows,
+  state,
+  update,
+} from "../lib/store.js";
 
 const COLUMNS = [
   // The star has no label: a column heading over one glyph reads as data. The cell's own
@@ -39,6 +48,9 @@ const COLUMNS = [
   { key: "name", label: "Server", sortable: true, className: "col-name" },
   { key: "clients", label: "Clients", sortable: true, numeric: true, className: "col-clients" },
   { key: "map", label: "Map now", sortable: true, className: "col-map" },
+  // The gametype the server publishes, in its own spelling — see `gameType` in lib/format.js
+  // for why it is not shortened to FFA/OBJ/TDM.
+  { key: "mode", label: "Mode", sortable: true, className: "col-mode" },
   // Ascending first: on a distance column the useful end is the small one, which is the
   // opposite of Clients, where the busy servers are what a player is looking for.
   {
@@ -51,6 +63,28 @@ const COLUMNS = [
   },
   { key: "runs", label: "Runs", sortable: false, className: "col-runs" },
 ];
+
+/**
+ * How many columns the table is actually drawing right now.
+ *
+ * Not `COLUMNS.length`: the narrow-window media queries in `styles/views.css` drop Runs, then
+ * Mode, then Ping, and a dropped column is gone from the table, not merely invisible. Every
+ * `colspan` here has to agree with that or it runs off the end of the row — and a `colspan` that
+ * overruns is not clipped. Chromium answers it by inventing the column the span asked for and
+ * splitting the free width evenly between that phantom and **Server**, the only column with no
+ * fixed width. That is what made the server name half its proper width in Favourites and History,
+ * which have absent rows, and full width in All, which has none.
+ *
+ * Read from the header row rather than from a matching set of breakpoints in JavaScript, so the
+ * media queries stay the one place the drop order is written down.
+ */
+function columnsShown(table) {
+  const cells = [...table.tHead.rows[0].cells];
+  const shown = cells.filter((cell) => cell.offsetParent !== null).length;
+  // Nothing has an `offsetParent` until the table is in the document. The first paint after that
+  // corrects it, and until then every column is drawn anyway.
+  return shown || COLUMNS.length;
+}
 
 const SCOPE_LABELS = { all: "All", favourites: "Favourites", history: "History" };
 
@@ -82,7 +116,7 @@ function selectScope(scope) {
   });
 }
 
-export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, onCheck }) {
+export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, onCheck, onGame }) {
   const search = el("input", {
     id: "server-search",
     type: "search",
@@ -119,15 +153,25 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     scopeButtons,
   );
 
+  // Which of the three games this session is browsing. It sits before the scope buttons because
+  // it decides which population they draw from: Allied Assault, Spearhead and Breakthrough
+  // register with the master separately, so this is a different list, not a filter over one.
+  // Hidden entirely on an install that has only one of them — a control with one option is noise.
+  const gameSelect = el("select", {
+    id: "game-select",
+    dataset: { focusKey: "game-select" },
+    onchange: (event) => onGame(event.target.value),
+  });
+  const gameField = el(
+    "label",
+    { className: "toolbar__game", for: "game-select" },
+    el("span", { className: "label" }, "Game"),
+    gameSelect,
+  );
+
   const hasPeople = toggle("Has people", () =>
     update((next) => {
       next.filters.hasPeople = !next.filters.hasPeople;
-      saveFilters();
-    }),
-  );
-  const hideBlocked = toggle("Hide unavailable maps", () =>
-    update((next) => {
-      next.filters.hideBlocked = !next.filters.hideBlocked;
       saveFilters();
     }),
   );
@@ -161,6 +205,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
   const toolbar = el(
     "div",
     { className: "toolbar" },
+    gameField,
     scopeGroup,
     el(
       "label",
@@ -169,7 +214,6 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
       search,
     ),
     hasPeople,
-    hideBlocked,
     el("span", { className: "toolbar__spacer" }),
     actionSlot,
   );
@@ -192,6 +236,36 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
   let lastSignature = null;
   let lastPainted = 0;
   let pending = null;
+  let lastColumns = COLUMNS.length;
+
+  // Nothing else in the app watches the window size. Without this, dragging the edge across a
+  // breakpoint leaves every absent row holding the colspan it was painted with, and the server
+  // name stays at the width that colspan produced until something unrelated forces a repaint.
+  // Only an actual change in the column count repaints, so a drag that crosses none costs one
+  // layout read per event.
+  window.addEventListener("resize", () => {
+    if (columnsShown(table) !== lastColumns) update(() => {});
+  });
+
+  // Rebuilt only when the detected products change, which is once per install: replacing the
+  // options on every render would drop the open dropdown mid-choice.
+  let lastGames = null;
+  const paintGame = () => {
+    const games = playableGames(state.install);
+    gameField.classList.toggle("hidden", games.length < 2);
+    const signature = games.join("|");
+    if (signature !== lastGames) {
+      lastGames = signature;
+      fill(
+        gameSelect,
+        ...games.map((game) => el("option", { value: game }, GAME_LABELS[game] ?? game)),
+      );
+    }
+    gameSelect.value = state.game;
+    // Switching mid-sweep would leave probes in flight for the game just left, and a download
+    // cannot be abandoned half-written at all.
+    gameSelect.disabled = state.browse.running || state.joining;
+  };
 
   const paintScope = () => {
     const counts = { all: state.servers.length, favourites: favourites().length, history: history().length };
@@ -269,6 +343,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     lastPainted = performance.now();
     const items = scopedRows();
     lastSignature = signature(items);
+    lastColumns = columnsShown(table);
     // Read the starred set once. Asking per row would parse the store a hundred-odd times a paint.
     const starred = favouriteAddresses();
     const launches = state.scope === "history" ? historyByAddress() : null;
@@ -278,17 +353,17 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
         ? items.map((item) =>
             item.kind === "live"
               ? row(item.row, starred, launches, onSelect)
-              : absentRow(item.entry, starred, launches, onCheck),
+              : absentRow(item.entry, starred, launches, lastColumns, onCheck, onGame),
           )
-        : emptyRow(),
+        : emptyRow(lastColumns),
     );
     syncSelection();
   };
 
   const render = () => {
     hasPeople.setAttribute("aria-pressed", state.filters.hasPeople ? "true" : "false");
-    hideBlocked.setAttribute("aria-pressed", state.filters.hideBlocked ? "true" : "false");
     if (search.value !== state.filters.query) search.value = state.filters.query;
+    paintGame();
     paintScope();
     caption.textContent = CAPTIONS[state.scope];
     paintHeaders();
@@ -297,7 +372,9 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     live.textContent = liveText();
 
     const next = signature(scopedRows());
-    if (next === lastSignature) {
+    // The column count is not in the signature — it is not a property of the rows — but crossing a
+    // breakpoint changes every colspan the last paint wrote, so it has to force one too.
+    if (next === lastSignature && columnsShown(table) === lastColumns) {
       syncSelection();
       syncStars();
       return;
@@ -424,6 +501,7 @@ function starCell(subject, address, hostname, starred) {
 function row(item, starred, launches, onSelect) {
   const { clients, bots, capacity } = occupancy(item.server);
   const ping = roundTrip(item.server);
+  const mode = gameType(item.server);
   const launched = launches ? launchedLabel(launches.get(item.address)) : null;
   const choose = () => {
     if (state.selected !== item.address) onSelect(item.address);
@@ -474,6 +552,11 @@ function row(item, starred, launches, onSelect) {
     ),
     el(
       "td",
+      { className: "col-mode" },
+      el("span", { className: "mode-cell", title: mode.title }, mode.text),
+    ),
+    el(
+      "td",
       { className: "num col-ping" },
       el("span", { className: "ping-cell", title: ping.title }, ping.text),
     ),
@@ -492,11 +575,16 @@ function row(item, starred, launches, onSelect) {
  * Those were true of a past moment, and drawn in these columns they would read as now (H12). What
  * the row offers instead is the one thing that can change that: check this server on its own.
  *
+ * The name is the one remembered thing left on the row, and it is not labelled as such: the row
+ * says "not in this check" across the columns where every figure would have been, so there is
+ * nothing here a reader could take for a current measurement. The italic `--remembered` name
+ * carries the rest.
+ *
  * The wording is "not in this check", not "offline". The sweep asks the master for a list and
  * probes what comes back; a server missing from that list was never asked, which is a different
  * fact from not answering. Only a check that actually failed may say the server did not answer.
  */
-function absentRow(entry, starred, launches, onCheck) {
+function absentRow(entry, starred, launches, columns, onCheck, onGame) {
   const check = state.checks.get(entry.address);
   const launched = launches ? launchedLabel(launches.get(entry.address)) : null;
   return el(
@@ -514,37 +602,84 @@ function absentRow(entry, starred, launches, onCheck) {
         entry.hostname || "(unnamed server)",
       ),
       el("span", { className: "server-address" }, entry.address),
-      // Said outright rather than left to the italics: this name is what the server called
-      // itself when it was starred, not what it answered with just now.
-      el("span", { className: "history-line" }, "remembered name"),
       launched && el("span", { className: "history-line" }, launched),
     ),
     el(
       "td",
-      { colspan: String(COLUMNS.length - 2) },
+      // The star and the name keep their own cells; the note and its button take everything left.
+      { colspan: String(columns - 2) },
       el("span", { className: "absent-note" }, absentNote(check)),
-      el(
-        "button",
-        {
-          type: "button",
-          className: "btn btn--sm",
-          disabled: check?.status === "checking",
-          onclick: (event) => {
-            event.stopPropagation();
-            onCheck(entry);
-          },
-        },
-        check?.status === "checking" ? "Checking…" : "Check",
-      ),
+      absentAction(entry, check, onCheck, onGame),
     ),
+  );
+}
+
+/**
+ * The one control an absent row offers, which is not always Check.
+ *
+ * A bookmark stores an address, so it outlives the game it was saved under. Once a check has found
+ * that this server runs another of the three, checking it again can only find the same thing: what
+ * moves the player forward is switching to that game — when this folder has it. When it does not,
+ * there is no action to offer and none is drawn, because a button that cannot work is worse than
+ * no button.
+ */
+function absentAction(entry, check, onCheck, onGame) {
+  const other = check?.otherGame;
+  if (other) {
+    if (!playableGames(state.install).includes(other)) return false;
+    return el(
+      "button",
+      {
+        type: "button",
+        className: "btn btn--sm",
+        disabled: state.browse.running || state.joining,
+        onclick: (event) => {
+          event.stopPropagation();
+          onGame(other);
+        },
+      },
+      `Switch to ${GAME_LABELS[other] ?? other}`,
+    );
+  }
+  const checking = check?.status === "checking";
+  return el(
+    "button",
+    {
+      type: "button",
+      className: "btn btn--sm",
+      // `aria-disabled` rather than `disabled`, as in the detail pane: this button goes busy the
+      // moment it is pressed, and the repaint cannot return focus to a disabled element.
+      "aria-disabled": checking ? "true" : null,
+      onclick: (event) => {
+        event.stopPropagation();
+        if (checking) return;
+        onCheck(entry);
+      },
+    },
+    checking ? "Checking…" : "Check",
   );
 }
 
 /** What is actually known about an absent server, which before a check is very little. */
 function absentNote(check) {
   if (check?.status === "checking") return "checking";
+  // A command that never ran is not a server that did not answer. Only the second may be reported
+  // as a fact about the server (H12).
+  if (check?.status === "failed") {
+    return el("span", { title: check.error }, "the check could not run");
+  }
   if (check?.movedTo) {
     return `answers at ${check.movedTo} now`;
+  }
+  // It answered — it is simply another of the three games, which this session's client cannot
+  // join. What to do about that is said in the row, not in a tooltip a keyboard cannot reach: the
+  // action beside it switches games, and when this folder cannot run that game the sentence says
+  // so instead, because then there is nothing to switch to.
+  if (check?.otherGame) {
+    const name = GAME_LABELS[check.otherGame] ?? check.otherGame;
+    return playableGames(state.install).includes(check.otherGame)
+      ? `runs ${name}`
+      : `runs ${name}, which is not in this game folder`;
   }
   if (check?.nonResult) {
     return el(
@@ -563,8 +698,8 @@ function absentNote(check) {
   );
 }
 
-function emptyRow() {
-  const filtering = state.filters.query || state.filters.hasPeople || state.filters.hideBlocked;
+function emptyRow(columns) {
+  const filtering = state.filters.query || state.filters.hasPeople;
   let body;
   // A scope with nothing saved and a scope whose entries are all filtered out are different
   // problems, and only one of them is fixed by clearing the search box.
@@ -609,7 +744,7 @@ function emptyRow() {
   return el(
     "tr",
     null,
-    el("td", { colspan: String(COLUMNS.length) }, el("div", { className: "placeholder" }, body)),
+    el("td", { colspan: String(columns) }, el("div", { className: "placeholder" }, body)),
   );
 }
 
@@ -735,6 +870,10 @@ export function nonResultsBreakdown() {
 }
 
 function liveText() {
+  // A single-server check is a state change with no progress meter and, in All, no row left behind
+  // when it fails. It is announced first because it is what the player just asked for.
+  const single = singleCheckText();
+  if (single) return single;
   if (state.scope !== "all") {
     const saved = state.scope === "favourites" ? favourites() : history();
     const present = new Set(state.servers.map((row) => row.address));
@@ -750,6 +889,28 @@ function liveText() {
     return `${state.summary.getstatus_reachable} servers answered out of ${state.summary.registered} registered.`;
   }
   return "";
+}
+
+/**
+ * What the last one-server check is doing or found, for the live region.
+ *
+ * Only the selected server is announced. A favourites batch checks several at once and reading out
+ * each one would bury the sweep summary the region is otherwise for.
+ */
+function singleCheckText() {
+  if (!state.selected) return null;
+  const check = state.checks.get(state.selected);
+  if (!check) return null;
+  const live = state.servers.find((row) => row.address === state.selected);
+  if (check.status === "checking") return `Checking ${state.selected}.`;
+  if (check.status === "failed") return `The check of ${state.selected} could not run. ${check.error}`;
+  if (live) return null;
+  const name = check.dropped?.hostname || state.selected;
+  if (check.otherGame) {
+    return `${name} answered for ${GAME_LABELS[check.otherGame] ?? check.otherGame} and was removed from the list.`;
+  }
+  if (check.movedTo) return `${name} now publishes ${check.movedTo} as its game address.`;
+  return `${name} did not answer and was removed from the list.`;
 }
 
 function signature(items) {

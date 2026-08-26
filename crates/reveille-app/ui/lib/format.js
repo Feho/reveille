@@ -69,6 +69,23 @@ export function roundTrip(server) {
 }
 
 /**
+ * The Mode column: the gametype the server publishes, as it spelled it.
+ *
+ * `g_gametypestring` is an ordinary server cvar. The stock engine sets it to one of seven
+ * labels, but a mod may put anything there, so the value is shown verbatim rather than mapped
+ * onto a fixed set or shortened to FFA/OBJ/TDM: an abbreviation Reveille invented would be a
+ * claim about a server it cannot check, and an unrecognised mode would have nowhere to go.
+ * A server that publishes none says so with the same em dash every other unpublished figure uses.
+ */
+export function gameType(server) {
+  const name = String(server.game_type ?? "").trim();
+  if (name === "") {
+    return { text: "—", title: "This server did not publish a gametype." };
+  }
+  return { text: name, title: name };
+}
+
+/**
  * The full build string, for the detail pane where it has room to wrap.
  * Servers report things like "Medal of Honor Allied Assault 1.11 win-x86 Mar 5 2002".
  */
@@ -152,6 +169,17 @@ export function stateExplanation(state) {
  * failures, and labelling both "did not answer" makes one group look like a
  * duplicate of the other.
  */
+/**
+ * The wall clock, to the minute — how every "when was this measured" is written.
+ *
+ * Absolute, not relative. These labels are drawn once and are not redrawn on a timer, so a
+ * "just now" left on screen goes quietly wrong as the minutes pass, which is the one thing a
+ * freshness label may not do. A clock time stays true however long it sits there.
+ */
+export function clockTime(date = new Date()) {
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 /**
  * How long ago something happened, for the history line.
  *

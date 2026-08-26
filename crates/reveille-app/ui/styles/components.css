@@ -22,12 +22,17 @@
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.btn:hover:not(:disabled) {
+.btn:hover:not(:disabled):not([aria-disabled="true"]) {
   background: #2a3340;
   border-color: var(--faint-deco);
 }
 
-.btn:disabled {
+/* `aria-disabled` reads the same as `disabled` and is styled the same, but the element keeps its
+   place in the tab order. A control that disables itself the moment it is pressed — the one-server
+   check does — takes the caret with it when it goes truly `disabled`, because focus cannot be
+   restored to a disabled element after the repaint. The handler refuses the second press instead. */
+.btn:disabled,
+.btn[aria-disabled="true"] {
   color: var(--faint-deco);
   border-color: var(--line);
   background: transparent;
@@ -39,12 +44,13 @@
   color: var(--brass-ink);
 }
 
-.btn--primary:hover:not(:disabled) {
+.btn--primary:hover:not(:disabled):not([aria-disabled="true"]) {
   background: #e6b558;
   border-color: #e6b558;
 }
 
-.btn--primary:disabled {
+.btn--primary:disabled,
+.btn--primary[aria-disabled="true"] {
   background: var(--brass-quiet);
   border-color: var(--brass-quiet);
   color: #8a7642;

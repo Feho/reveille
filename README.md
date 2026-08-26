@@ -2,12 +2,16 @@
 
 # Reveille
 
-Reveille is a newcomer-first launcher for Medal of Honor: Allied Assault. The current
-Windows v1 identifies an existing installation, browses servers answering now, checks their
-map rotations, safely installs exact missing-map matches, and launches retail MOHAA or
-OpenMoHAA. The reusable pipeline lives in `reveille-core`; both the CLI proof and Tauri desktop
-shell call it directly, while `reveille-platform` holds their shared Windows write-target and
-process-launch policy.
+Reveille is a newcomer-first launcher for Medal of Honor: Allied Assault and its two
+expansions, Spearhead and Breakthrough. The current Windows v1 identifies an existing
+installation, browses servers answering now, checks their map rotations, safely installs exact
+missing-map matches, and launches retail MOHAA or OpenMoHAA. The reusable pipeline lives in
+`reveille-core`; both the CLI proof and Tauri desktop shell call it directly, while
+`reveille-platform` holds their shared Windows write-target and process-launch policy.
+
+Each game has its own server list and its own content directory: Allied Assault reads `main`,
+Spearhead reads `main` and then `mainta`, Breakthrough reads `main` and then `maintt`. The app
+offers only the ones the selected folder actually has, in the toolbar's **Game** switch.
 
 ## Run the Windows app
 
@@ -36,7 +40,8 @@ cargo run -p reveille-cli -- scan /path/to/MOHAA
 
 The scan reports the number of archives and maps, duplicate map providers, and the effective
 checksum for every map. Providers are ordered in engine lookup order; the first provider is the
-file the engine loads.
+file the engine loads. Add `--game spearhead` or `--game breakthrough` to index that game's
+search path instead, which is the expansion's directory over `main` rather than in place of it.
 
 ## Browse public servers
 

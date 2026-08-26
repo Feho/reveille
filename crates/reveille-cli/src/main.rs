@@ -56,6 +56,9 @@ enum Command {
     Scan {
         /// MOHAA installation root (the directory containing `main`).
         path: PathBuf,
+        /// Game family whose search path is indexed. Spearhead and Breakthrough read `main` too.
+        #[arg(long, value_enum, default_value_t = Game::AlliedAssault)]
+        game: Game,
         /// Output format.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
@@ -90,6 +93,9 @@ enum Command {
         server: SocketAddrV4,
         /// MOHAA installation root (the directory containing `main`).
         path: PathBuf,
+        /// Fallback profile when the server omits or mangles `com_gamename`.
+        #[arg(long, value_enum, default_value_t = Game::AlliedAssault)]
+        game: Game,
         /// Per-server status-query deadline in milliseconds.
         #[arg(long, default_value_t = 2_500)]
         timeout_ms: u64,
@@ -179,7 +185,9 @@ impl From<ClientFlavor> for platform::ClientKind {
 #[derive(Serialize)]
 struct ScanOutput<'a> {
     installation: &'a install::Installation,
-    game_directory: &'a Path,
+    target: TargetGame,
+    /// Game directories read for this target, lowest precedence first.
+    search_path: &'a [PathBuf],
     index: &'a MapIndex,
 }
 
@@ -213,7 +221,9 @@ struct ClassifiedServer {
 #[derive(Serialize)]
 struct ResolveOutput<'a> {
     server: SocketAddrV4,
-    game_directory: &'a Path,
+    target: TargetGame,
+    /// Game directories read for this target, lowest precedence first.
+    search_path: &'a [PathBuf],
     preflight: &'a reveille_core::preflight::Report,
     pakradar: &'a Option<PakRadarOutput>,
     catalogue: &'a content::CatalogueResolutionPass,
@@ -285,7 +295,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             )
             .await
         }
-        Command::Scan { path, format } => scan(&path, format),
+        Command::Scan { path, game, format } => scan(&path, game.into(), format),
         Command::Browse {
             game,
             limit,
@@ -311,6 +321,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
         Command::Resolve {
             server,
             path,
+            game,
             timeout_ms,
             catalogue_timeout_ms,
             format,
@@ -318,6 +329,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             resolve_server(
                 server,
                 &path,
+                game.into(),
                 Duration::from_millis(timeout_ms),
                 Duration::from_millis(catalogue_timeout_ms),
                 format,
@@ -353,6 +365,51 @@ async fn run() -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// Where content for this target goes, and an index of every directory the engine reads for it.
+///
+/// The destination and the index are resolved together because they are two answers to the same
+/// question: the destination is one directory in the search path, and reporting one without the
+/// other is how a download lands somewhere the index never looked.
+fn destination_and_index(
+    install_root: &Path,
+    target: TargetGame,
+    client_kind: platform::ClientKind,
+) -> Result<(platform::InstallTarget, MapIndex), Box<dyn Error>> {
+    let installation = playable_install(install_root, target)?;
+    let install_target = platform::resolve_install_target(
+        &installation.root,
+        LaunchProfile::new(target).data_directory(),
+        client_kind,
+    )?;
+    let index = MapIndex::scan_chain(&platform::content_search_path(
+        &installation.root,
+        target,
+        client_kind,
+    ))?;
+    Ok((install_target, index))
+}
+
+/// Identify an install and refuse a game its data directories cannot serve (rule H14).
+///
+/// Every command that indexes or installs for a target goes through here. Without it the CLI
+/// would happily index `main` and label the result Spearhead, or create a home fallback for an
+/// expansion the folder has never had.
+fn playable_install(
+    install_root: &Path,
+    target: TargetGame,
+) -> Result<install::Installation, Box<dyn Error>> {
+    let installation = install::identify(install_root)?;
+    if !installation.provides(target) {
+        return Err(format!(
+            "{} cannot be run from {}: its game files are not there",
+            target.label(),
+            installation.root.display()
+        )
+        .into());
+    }
+    Ok(installation)
+}
+
 async fn run_journey(
     address: SocketAddrV4,
     selected_path: Option<&Path>,
@@ -365,6 +422,8 @@ async fn run_journey(
     let client_kind = client_kind.unwrap_or_else(|| platform::detect_client(&installation.root));
     println!("Install: {}", installation.root.display());
     println!("Identification: {:?}", installation.identification);
+
+    let installation = playable_install(&installation.root, target)?;
 
     let server = browse_journey_target(target, address).await?;
     let profile = LaunchProfile::new(target);
@@ -380,7 +439,8 @@ async fn run_journey(
         );
     }
 
-    let index = MapIndex::scan(&install_target.game_directory)?;
+    let search_path = platform::content_search_path(&installation.root, target, client_kind);
+    let index = MapIndex::scan_chain(&search_path)?;
     let initial = reveille_core::join::classify_server(&index, &server, None);
     println!("Preflight: {}", render_compatibility_state(&initial.state));
     let wanted = initial
@@ -404,7 +464,7 @@ async fn run_journey(
         println!("Content non-result: {non_result}");
     }
 
-    let updated_index = MapIndex::scan(&install_target.game_directory)?;
+    let updated_index = MapIndex::scan_chain(&search_path)?;
     let final_assessment =
         reveille_core::join::classify_server(&updated_index, &server, catalogue.as_ref());
     println!(
@@ -519,10 +579,8 @@ async fn join_server(request: JoinRequest<'_>) -> Result<(), Box<dyn Error>> {
         .and_then(|value| TargetGame::from_game_name(value))
         .unwrap_or(fallback_target);
     let profile = LaunchProfile::new(target);
-    let install_target =
-        platform::resolve_install_target(install_root, profile.data_directory(), client_kind)?;
-    let game_directory = install_target.game_directory;
-    let index = MapIndex::scan(&game_directory)?;
+    let (install_target, index) = destination_and_index(install_root, target, client_kind)?;
+    let game_directory = install_target.game_directory.clone();
     let rotation = status
         .get("sv_maplist")
         .map(|value| value.split_whitespace().collect::<Vec<_>>())
@@ -800,14 +858,34 @@ fn shell_quote(part: &str) -> String {
 async fn resolve_server(
     server: SocketAddrV4,
     install_root: &Path,
+    fallback_target: TargetGame,
     server_timeout: Duration,
     catalogue_timeout: Duration,
     format: Format,
 ) -> Result<(), Box<dyn Error>> {
-    let game_directory = install_root.join("main");
-    let index = MapIndex::scan(&game_directory)?;
     let game_port = discovery::GamePort::new(server.port());
     let status = discovery::query_getstatus(*server.ip(), game_port, server_timeout).await?;
+    // The server names the family it belongs to, so the search path is known before the index is
+    // built. A server that publishes no `com_gamename` falls back to `--game`, which is stated
+    // rather than assumed: resolving a Spearhead rotation against `main` alone would report maps
+    // as missing that the player already owns.
+    let published = status
+        .get("com_gamename")
+        .and_then(|value| TargetGame::from_game_name(value));
+    if published.is_none() {
+        println!(
+            "Note: this server published no com_gamename; resolving as {}.",
+            fallback_target.label()
+        );
+    }
+    let target = published.unwrap_or(fallback_target);
+    let installation = playable_install(install_root, target)?;
+    let search_path = platform::content_search_path(
+        &installation.root,
+        target,
+        platform::detect_client(&installation.root),
+    );
+    let index = MapIndex::scan_chain(&search_path)?;
     let rotation = status
         .get("sv_maplist")
         .map(|value| value.split_whitespace().collect::<Vec<_>>())
@@ -863,7 +941,8 @@ async fn resolve_server(
             "{}",
             serde_json::to_string_pretty(&ResolveOutput {
                 server,
-                game_directory: &game_directory,
+                target,
+                search_path: &search_path,
                 preflight: &preflight,
                 pakradar: &pakradar,
                 catalogue: &catalogue,
@@ -950,7 +1029,14 @@ async fn browse_servers(
     let report = discovery::browse(config).await?;
     let summary = report.summary();
     let compatibility = install_root
-        .map(|root| MapIndex::scan(root.join(LaunchProfile::new(target).data_directory())))
+        .map(|root| -> Result<MapIndex, Box<dyn Error>> {
+            let installation = playable_install(root, target)?;
+            Ok(MapIndex::scan_chain(&platform::content_search_path(
+                &installation.root,
+                target,
+                platform::detect_client(&installation.root),
+            ))?)
+        })
         .transpose()?
         .map(|index| classify_browse_report(&index, &report));
     match format {
@@ -1086,17 +1172,22 @@ fn render_occupancy(
     rendered
 }
 
-fn scan(path: &Path, format: Format) -> Result<(), Box<dyn Error>> {
-    let installation = install::identify(path)?;
-    let game_directory = path.join("main");
-    let index = MapIndex::scan(&game_directory)?;
+fn scan(path: &Path, target: TargetGame, format: Format) -> Result<(), Box<dyn Error>> {
+    let installation = playable_install(path, target)?;
+    let search_path = platform::content_search_path(
+        &installation.root,
+        target,
+        platform::detect_client(&installation.root),
+    );
+    let index = MapIndex::scan_chain(&search_path)?;
 
     match format {
         Format::Json => println!(
             "{}",
             serde_json::to_string_pretty(&ScanOutput {
                 installation: &installation,
-                game_directory: &game_directory,
+                target,
+                search_path: &search_path,
                 index: &index,
             })?
         ),
@@ -1105,7 +1196,10 @@ fn scan(path: &Path, format: Format) -> Result<(), Box<dyn Error>> {
             println!("Install: {}", installation.root.display());
             println!("Identification: {:?}", installation.identification);
             println!("Products: {:?}", installation.products);
-            println!("Game directory: {}", game_directory.display());
+            println!("Game: {}", target.label());
+            for directory in search_path.iter().rev() {
+                println!("Game directory: {}", directory.display());
+            }
             println!("Archives: {}", stats.archives);
             println!("Package directories: {}", stats.package_directories);
             println!("Loose BSP files: {}", stats.loose_bsp_files);

@@ -72,7 +72,7 @@ outranks the install directory in the search path (`files.cpp:3245-3257`) — bu
 installs land in Program Files is not measured.** GOG's standalone installer defaults to
 `C:\GOG Games\…`, which needs no elevation, so this may be rarer than it feels.
 **What Reveille does** Probes writability rather than inferring it from the path string, falls
-back to `%APPDATA%\moh\main` on OpenMoHAA, and prints the real destination. Never raises a UAC
+back to `%APPDATA%\openmohaa\<game directory>` on OpenMoHAA, and prints the real destination. Never raises a UAC
 prompt mid-journey. On retail there is no home path, so an unwritable folder is reported as a
 real blocker instead of being worked around.
 **Status** Shipped.
@@ -133,6 +133,29 @@ Reveille at all.
 the player got in — admission is the server's decision at connect time and no reply reports it
 (rule **H12**). And a bookmark stores an address, a query port and a name: no client count, no map,
 no round trip, so there is no stale measurement that could be redrawn as current.
+
+### F10 · The figures on the list are older than they look
+
+**Where** Browse.
+**Who it stops** Anyone who reads the list, then thinks about it before clicking. A sweep of ~190
+registered endpoints takes long enough that a server's client count, map and round trip are already
+minutes old by the time a player has compared three of them — and nothing on screen said when they
+were taken, so "0 clients" read as *empty now* rather than *empty when this ran*. The only remedy
+was **Refresh**, which re-asks every server to update one and loses the selection doing it.
+**Evidence** *Assumed, 26 Aug 2026.* Asked for, not measured. What would make it Measured is the
+gap between a row's measurement and the join it leads to; that is not collected. The cost of the
+old remedy is Measured — a full sweep is a couple of hundred probes (`plan.md:233`).
+**What Reveille does** The detail pane says when the row was measured — **From the check at 14:32**
+for a row the sweep returned, **Checked at 14:32** for one asked again on its own — and offers
+**Check again** (`R`), which runs the same one-request `check_server` probe an absent favourite's
+**Check** runs. The time is part of the feature, not decoration: a server that answers with the same
+four players it had before would otherwise leave the player unable to tell whether anything
+happened.
+**What it deliberately does not do** No polling and no auto-refresh of the selected row. A timer
+would send requests at third-party servers nobody asked to have watched, and it would move figures
+under a player mid-decision. And a check that runs and gets no answer **drops the row** instead of
+leaving its figures on screen: the check is evidence about now, and they are not (rule **H12**).
+**Status** Shipped.
 
 ---
 

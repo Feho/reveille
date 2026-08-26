@@ -20,21 +20,32 @@ import {
   launchedLabel,
   mapKey,
   mapName,
+  nonResultReason,
   plural,
   stateExplanation,
   stateName,
 } from "../lib/format.js";
 import { historyByAddress, isFavourite, toggleFavourite } from "../lib/bookmarks.js";
-import { selectedRow, state, update } from "../lib/store.js";
+import {
+  GAME_LABELS,
+  canRecheck,
+  playableGames,
+  selectedRow,
+  state,
+  update,
+} from "../lib/store.js";
 
-export function joinView(root, { onJoin }) {
+export function joinView(root, { onJoin, onRecheck }) {
   const scroll = el("div", { className: "detail-pane__scroll" });
   const actions = el("div", { className: "actions" });
   fill(root, scroll, actions);
 
   const render = () => {
     const row = selectedRow();
-    if (!row) {
+    // A selection whose row has left the list because a check found it gone. The pane keeps the
+    // player's place and says what the check found, rather than emptying with no explanation.
+    const gone = !row && state.selected ? state.checks.get(state.selected) : null;
+    if (!row && !gone?.dropped) {
       fill(scroll, idlePlaceholder());
       fill(actions);
       actions.classList.add("hidden");
@@ -42,8 +53,11 @@ export function joinView(root, { onJoin }) {
     }
     actions.classList.remove("hidden");
     preserveFocus(root, () => {
-      fill(scroll, body(row));
-      fill(actions, ...actionBar(row, onJoin));
+      fill(scroll, row ? body(row, onRecheck) : gonePane(state.selected, gone));
+      fill(
+        actions,
+        ...(row ? actionBar(row, onJoin) : goneActions(state.selected, gone, onRecheck)),
+      );
     });
   };
 
@@ -59,7 +73,7 @@ function idlePlaceholder() {
   );
 }
 
-function body(row) {
+function body(row, onRecheck) {
   const { server, compatibility } = row;
   const preview = state.preview?.address === row.address ? state.preview : null;
   const assessment = preview?.assessment ?? compatibility;
@@ -67,7 +81,7 @@ function body(row) {
   const result = state.joinResult?.address === row.address ? state.joinResult : null;
 
   return frag(
-    header(row, server),
+    header(row, server, onRecheck),
     facts(server),
     result ? outcomeSection(result) : null,
     run ? installSection(run) : null,
@@ -76,7 +90,7 @@ function body(row) {
   );
 }
 
-function header(row, server) {
+function header(row, server, onRecheck) {
   const starred = isFavourite(row.address);
   const launched = launchedLabel(historyByAddress().get(row.address));
   return el(
@@ -117,7 +131,139 @@ function header(row, server) {
         },
         launched,
       ),
+    freshness(row, onRecheck),
   );
+}
+
+/**
+ * When this row was measured, and the one control that changes the answer.
+ *
+ * Every figure above it — the client count, the map, the round trip — was taken at one moment and
+ * has been ageing since. Nothing else on screen says which moment, so a server that filled up ten
+ * minutes ago still reads as empty. **Check again** asks this one server, and the time is what
+ * shows it happened when the answer comes back the same.
+ *
+ * Hidden while a sweep runs: that is already re-asking every server in the list, this row included.
+ */
+function freshness(row, onRecheck) {
+  if (state.browse.running) return null;
+  const check = state.checks.get(row.address);
+  return el(
+    "div",
+    { className: "detail__freshness" },
+    el(
+      "div",
+      { className: "detail__freshness-row" },
+      checkedLine(row.address),
+      el(
+        "button",
+        {
+          type: "button",
+          className: "btn btn--sm",
+          // `aria-disabled`, not `disabled`: this button disables itself the moment it is pressed,
+          // and focus cannot be restored to a disabled element after the repaint, so a keyboard
+          // player would lose the caret on every check. `canRecheck` refuses the press instead.
+          "aria-disabled": canRecheck(row.address) ? null : "true",
+          dataset: { focusKey: "detail-recheck" },
+          title: "Ask this one server again, without re-checking the whole list.",
+          onclick: () => onRecheck(row),
+        },
+        check?.status === "checking" ? "Checking…" : "Check again",
+      ),
+    ),
+    // A command that never ran is not a server that did not answer, and the figures above are still
+    // the last thing actually measured. Saying so is what stops an unchanged timestamp from reading
+    // as a fresh confirmation.
+    check?.status === "failed"
+      ? el("p", { className: "error", role: "alert" }, `The check could not run. ${check.error}`)
+      : null,
+  );
+}
+
+/**
+ * When the figures on this row were measured.
+ *
+ * A row the sweep returned is timed by when the sweep finished, which is not exactly when that row
+ * answered — probes stream in across the whole run — so it is worded as the check it came from
+ * rather than as a measurement of this one server. A row a single check re-asked has its own time,
+ * and that one can say so plainly.
+ */
+function checkedLine(address) {
+  const own = state.checkedAt.get(address);
+  if (own) {
+    return el(
+      "p",
+      { className: "quiet", title: "This server was asked again then. The figures are that reply." },
+      `Checked at ${own}`,
+    );
+  }
+  const swept = state.browse.completedAt;
+  if (!swept) return el("p", { className: "quiet" }, "");
+  return el(
+    "p",
+    { className: "quiet", title: "The figures on this row come from that check, and not since." },
+    `From the check at ${swept}`,
+  );
+}
+
+/**
+ * The selected server, after a check that ran and found it no longer there.
+ *
+ * The row has left the list, because a check that got no answer is evidence about now and the
+ * client count, map and round trip it replaced are not (docs/rules.md H12). Emptying the pane
+ * instead would lose the player's place and say nothing about why, so what is left is the name it
+ * had, the address, what the check found, and the one thing that can change the answer.
+ *
+ * The name is drawn in the remembered style, like an absent row's, because it is the only thing
+ * here that came from a past reading.
+ */
+function gonePane(address, check) {
+  return frag(
+    el(
+      "div",
+      { className: "detail__head" },
+      el("p", { className: "label" }, "Server"),
+      el(
+        "h2",
+        { className: "detail__title detail__title--remembered" },
+        check.dropped.hostname || "(unnamed server)",
+      ),
+      el("p", { className: "data quiet selectable" }, address),
+    ),
+    el(
+      "div",
+      { className: "detail__section" },
+      el("p", { className: "label" }, "Last check"),
+      el("h3", { className: "display heading-sm" }, goneHeadline(check)),
+      el("p", { className: "quiet" }, goneDetail(check, address)),
+    ),
+  );
+}
+
+function goneHeadline(check) {
+  if (check.status === "checking") return "Checking…";
+  if (check.status === "failed") return "The check did not run";
+  if (check.otherGame) return `Runs ${GAME_LABELS[check.otherGame] ?? check.otherGame}`;
+  if (check.movedTo) return "Answers at another address";
+  return "Did not answer";
+}
+
+function goneDetail(check, address) {
+  if (check.status === "checking") return `Asking ${address} again.`;
+  if (check.status === "failed") return `The check could not run. ${check.error}`;
+  if (check.otherGame) {
+    const name = GAME_LABELS[check.otherGame] ?? check.otherGame;
+    return playableGames(state.install).includes(check.otherGame)
+      ? `It answered for ${name}. Switch this session to ${name} to join it.`
+      : `It answered for ${name}, which this game folder cannot run.`;
+  }
+  // "Publishes", not "replied from": the reply came from the query port that was asked. What moved
+  // is the game address the server publishes in it.
+  if (check.movedTo) {
+    return `It now publishes ${check.movedTo} as its game address, which is in the list.`;
+  }
+  if (check.nonResult) return `This server ${nonResultReason(check.nonResult)}.`;
+  return "This server did not answer.";
 }
 
 function facts(server) {
@@ -429,7 +575,7 @@ function outcomeSection(result) {
       "p",
       { className: "quiet" },
       launched
-        ? "Allied Assault is connecting. Bans, a full server and ping limits are the server's call from here."
+        ? `${GAME_LABELS[result.game] ?? "The game"} is connecting. Bans, a full server and ping limits are the server's call from here.`
         : result.outcome.reason,
     ),
     result.installed.length
@@ -519,12 +665,40 @@ export function shoppingTotals(preview) {
   return { size, count, pending };
 }
 
+/**
+ * The one control a gone server offers: ask it again.
+ *
+ * Offered whatever the check found, including a server that answered for another game — unlike
+ * an absent bookmark, this row *was* in this game's list a moment ago, so what the check found is
+ * a change and asking again is the way to see whether it changed back.
+ */
+function goneActions(address, check, onRecheck) {
+  return [
+    el(
+      "button",
+      {
+        type: "button",
+        className: "btn btn--block",
+        // Focusable while busy, for the same reason as the freshness control above.
+        "aria-disabled": canRecheck(address) ? null : "true",
+        dataset: { focusKey: "detail-recheck" },
+        onclick: () =>
+          onRecheck({ address, server: { endpoint: { query_port: check.dropped.queryPort } } }),
+      },
+      check.status === "checking" ? "Checking…" : "Check again",
+    ),
+  ];
+}
+
 function actionBar(row, onJoin) {
   const preview = state.preview?.address === row.address ? state.preview : null;
   const assessment = preview?.assessment ?? row.compatibility;
   const kind = assessment.state.state;
   const readiness = assessment.current_map?.readiness ?? "unknown";
-  const busy = Boolean(state.installRun && !state.installRun.done);
+  const busy = Boolean(state.joining);
+  // A probe in flight can drop this row before the join command returns, and the outcome would then
+  // have no row to render against. One request either way; waiting for it costs a moment.
+  const checking = state.checks.get(row.address)?.status === "checking";
   const resolving = Boolean(state.previewProgress && !preview);
   const totals = preview ? shoppingTotals(preview) : { size: 0, count: 0, pending: 0 };
   const result = state.joinResult?.address === row.address ? state.joinResult : null;
@@ -597,13 +771,13 @@ function actionBar(row, onJoin) {
         {
           type: "button",
           className: "btn btn--primary",
-          disabled: busy || resolving,
+          disabled: busy || resolving || checking,
           dataset: { focusKey: "join" },
           // Consent is the click. The label names what this join is missing, so a
           // separate confirmation toggle would only add a step to the same answer.
           onclick: () => onJoin(row, kind !== "compatible"),
         },
-        busy ? "Working…" : joinLabel(kind, totals),
+        busy ? "Working…" : checking ? "Checking…" : joinLabel(kind, totals),
       ),
     ),
   );

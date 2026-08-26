@@ -66,9 +66,11 @@ looked like, so it does not have to be re-derived.
 | `CantTell` | `not published` | `--faint`, italic |
 | `CantTell`, current map absent | `+ 1 map` | none (default ink) |
 
-The **Hide unavailable maps** toggle survives the removal and now filters on a state the list no
-longer shows. That is deliberate — it is the one case where the work cannot be done at all — but it
-is worth knowing the control is doing something invisible.
+A **Hide unavailable maps** toggle survived the removal for a while, filtering on a state the list
+no longer showed. It has since been dropped: a control whose effect is invisible cannot be judged
+by the player pressing it, and rows vanishing for a reason nothing on screen states is worse than
+the rows being there. `Has people` is now the only toggle. The **no "only compatible" filter**
+prohibition below always covered this ground anyway.
 
 **The four canonical state names still exist and are unchanged** — `Compatible`, `Needs N maps`,
 `No source`, `Can't tell`. They appear in the detail pane, under **Join check**, where the decision
@@ -96,7 +98,7 @@ There is **one** primary surface. The three-screen wizard was removed.
 ┌──────────────────────────────────────────────────────────────┐
 │ REVEILLE                              D:\Jeux\EA GAMES\MOHDA │  titlebar
 ├──────────────────────────────────────────────────────────────┤
-│ [All 106│Fav 3│History] ⌕ search  ☐ Has people  ▓▓▓░ 78/190 Stop│ toolbar
+│ GAME [Spearhead ▾] [All 106│Fav 3│History] ⌕ search  ▓▓▓░ 78/190 │ toolbar
 ├───────────────────────────────────────┬──────────────────────┤
 │ ★ SERVER      CLIENTS  MAP NOW   PING  RUNS │  detail pane    │
 │ ★ harzCore      40/64  dm/mohdm6  21ms  1.11 │  server facts   │
@@ -113,24 +115,106 @@ There is **one** primary surface. The three-screen wizard was removed.
   engine receives a recommendation badge. Version, download size, installed state, and active state
   appear only where relevant. OpenMoHAA's stable/preview selector stays inside its card. Continue is
   disabled when the selected engine is unavailable. Reborn installation selects and activates it,
-  while switching keeps both managed engines installed. The titlebar chip names the active engine
-  beside the canonical game folder.
+  while switching keeps both managed engines installed. The titlebar chip names the selected game
+  and the active engine beside the canonical game folder.
+  **When the folder can run more than one game it also asks "Which game do you want to play?"**,
+  as a plain radio row above the engine cards — no cards, because there is nothing to say about
+  each option but its name. It is asked here rather than left to the toolbar because Continue
+  starts a search immediately, and the toolbar's switch is disabled while a search runs: a player
+  told to choose afterwards would find the control greyed out. One question with an obvious
+  default costs less than an unwanted sweep.
+  **Returning here and changing the answer sweeps again.** Setup is re-entered from the titlebar
+  chip, and what it changes — the folder, the engine, the game — is exactly what the table on
+  screen was the answer to. Continue therefore drops that list and sweeps, by the same rule as the
+  toolbar switch: `state.listSession` records what the rows were swept for, and `enterServers`
+  compares it. A session that comes back unchanged keeps its list, because re-sweeping it would
+  cost a couple of hundred probes to redraw the same table.
+- **Game** — a select at the head of the toolbar, labelled **Game**, listing only the games the
+  folder can actually run. That is `Installation.playable`, not `products`: an expansion needs the
+  base game underneath it, and a folder with `mainta` and no `main` runs nothing (rules **H13**,
+  **H14**). **Hidden when there is only one**, which is the common case; a control with a single
+  option is noise. It is *not* a filter, and must never be built as one: the three register with
+  the master separately and read different directories on disk, so changing it drops the list and
+  sweeps again rather than re-labelling what is on screen. Disabled while a sweep is running, and
+  while a download is running — a transfer cannot be abandoned half-written. Switching also
+  discards the results of anything still in flight, so an install started for one game cannot
+  report its outcome into another. The choice is remembered per install folder and named in the
+  titlebar chip beside the engine.
 - **Servers** (`views/servers.js`) — where the session lives.
-- **Scope** (`All` · `Favourites` · `History`) — three exclusive buttons at the head of the
-  toolbar. Not tabs: there is still one table, one set of columns and one selection, and only the
-  population it draws from changes. **This is not a compatibility filter** and must never grow
+- **Scope** (`All` · `Favourites` · `History`) — three exclusive buttons in the toolbar, after
+  **Game**. Not tabs: there is still one table, one set of columns and one selection; these
+  buttons choose which *view* of the selected game's servers is drawn. **Game** selects the
+  population, Scope selects the view — a distinction worth keeping in the copy, because they sit
+  next to each other. **This is not a compatibility filter** and must never grow
   into one — see §2.1 on why there is no "only compatible" control. `Favourites` lists what the
   player starred; `History` lists what Reveille launched the game for, most recent first, which is
-  a sort key no column header owns, so no arrow is drawn in that scope.
+  a sort key no column header owns, so no arrow is drawn in that scope. **One table means one set of
+  column widths**, and the switch may not change them. Every column but **Server** has a fixed
+  width, so the name column absorbs any error in the rest of the layout, and it absorbed two:
+    - The list pane reserves its scrollbar gutter permanently. Without that, a scrolling `All` and
+      a short `Favourites` handed the name column two widths 10px apart.
+    - **An absent row's `colspan` counts the columns actually drawn, never `COLUMNS.length`.** The
+      narrow-window breakpoints drop Runs, then Mode, then Ping, and a dropped column is gone from
+      the table rather than merely invisible — so below 1200px a colspan of `COLUMNS.length - 2`
+      overran the row. An overrunning colspan is not clipped: Chromium invents the column that was
+      asked for and splits the free width evenly between that phantom and **Server**. Measured at a
+      1150px viewport, that halved the name column to 128px and left `Favourites` and `History` —
+      the two scopes that have absent rows — visibly narrower than `All`, which has none.
+      `columnsShown()` reads the count off the header row, so the media queries stay the one place
+      the drop order is written down, and a resize that crosses a breakpoint repaints the rows.
+- **Mode** — a column between **Map now** and **Ping**, carrying `g_gametypestring` exactly as the
+  server spelled it: `Objective-Match`, `Free-For-All`, `Round-Based-Match`. The stock engine sets
+  it to one of seven labels (`gamecvars.cpp:560-578`), but it is an ordinary server cvar and a mod
+  may publish anything, so the value is **never** mapped onto a fixed set or shortened to
+  FFA/OBJ/TDM: an abbreviation Reveille invented would be a claim about a server it cannot check,
+  and an unrecognised mode would have nowhere to go. A server publishing none gets the same em dash
+  every other unpublished figure gets, and its tooltip says so. Sortable, and blanks sort to the far
+  end so a run of dashes cannot bury the modes being scanned. It is a label, not a measurement, so
+  it takes the text face rather than the data face and carries no colour, for the same reason
+  **Ping** carries none. **The narrow-window drop order is Runs, then Mode, then Ping** — the server
+  name is what those breakpoints protect, and two servers you cannot tell apart cost more than any
+  of the three.
 - **A remembered server the current check did not return** stays in the list as an *absent* row:
-  its star, its address, its name marked `remembered name`, the words **not in this check**, and a
-  **Check** button. Nothing else — no client count, no map, no round trip, because those were true
-  of a past moment (rule **H12**). The button runs `check_server`, the same probe the sweep runs at
+  its star, its address, its name in the italic *remembered* style, the words **not in this check**
+  across the columns, and a **Check** button. Nothing else — no client count, no map, no round trip, because those were true
+  of a past moment (rule **H12**). A bookmark is an address, so it outlives the game it was saved
+  under: one that answers for another of the three stays an absent row reading **runs Spearhead**
+  and is never promoted to a live server row, because this session's client would be dropped at
+  connect. Its **Check** button is replaced by **Switch to Spearhead** — checking again can only
+  find the same thing, and the guidance belongs in the row, not in a `title` a keyboard cannot
+  reach (§9). When the folder cannot run that game there is no button at all and the row says
+  **runs Spearhead, which is not in this game folder**: an action that cannot work is worse than
+  none. The button runs `check_server`, the same probe the sweep runs at
   the same deadline; a server that answers becomes an ordinary row and is joinable, and one that
   does not says **did not answer** with the recorded reason in its `title`. Favourites the sweep
   missed are checked once automatically per completed sweep, on first entry into that scope.
 - **Detail pane** (`views/join.js`) — selection previews the join *in place*. No
   browser → join → back navigation; servers stay comparable; the list never disappears.
+- **The selected server can be checked again on its own.** Under the address the pane says when the
+  row was measured and offers **Check again** (`R`), which runs the same `check_server` probe an
+  absent row's **Check** runs — one UDP request, not the couple of hundred a full **Refresh**
+  costs. It exists because every figure on a row was measured at one moment and has been ageing
+  since: a server that filled up ten minutes ago still reads as empty, and nothing else on screen
+  said when. The time is also what makes the control legible when the answer comes back unchanged —
+  without it, pressing the button on a server that still has four players looks like nothing
+  happened. **Two wordings, because they are two different claims**: **Checked at 14:32** for a row
+  this probe re-asked, and **From the check at 14:32** for one the sweep returned, whose rows
+  streamed in across the whole run and so were not all measured at its finish time. A check that
+  could not *run* says so on its own line, as an alert, and leaves the timestamp alone — the last
+  measured figures are still the last measured figures. Hidden while a sweep is running, which is
+  already re-asking every row, and refused while a join is running, which owns the pane; **Join** is
+  refused in the other direction for the same reason, while a probe for that row is in flight.
+- **A check that runs and gets no answer takes the row out of the list.** The figures it replaces
+  were true of the last check and have just been shown not to be true now, so they are dropped
+  rather than left standing (rule **H12**). In `Favourites` or `History` the row becomes an ordinary
+  absent row; in `All` it leaves the table altogether. The selection is kept either way and the
+  detail pane says which server it was, in the *remembered* style, what the check found — **Did not
+  answer**, **Runs Spearhead**, **Answers at another address** — and offers **Check again**. An
+  empty pane after a button press would lose the player's place and explain nothing. **A server that
+  moved is not followed**: the selection stays where the player put it and the pane says the server
+  now publishes another game address, by the same rule that stops a bookmark being repointed — a
+  shared query port is not proof of the same server — and because the new address is often not in
+  the scope being viewed.
 - Install progress and the launch outcome render inside the detail pane, not as separate screens.
 
 ## 4. Honesty rules, as UI rules
@@ -151,11 +235,13 @@ Change a rule in the register first, then update the right-hand column here.
 | **H5** · Never imply the release digest proves publisher authenticity | Visible setup copy promises only that Reveille checks whether the download arrived intact; it never calls the file safe or the publisher verified. The release page's exact file check is optional tooltip detail, not newcomer-facing copy. |
 | **H6** · Never state a cause that was not observed | Engine failures are classified in Rust (`OpenMohaaFailureKind`), never by matching message text in the shell. A release that publishes no file check was never downloaded and says so; only a size or digest mismatch may say the download did not arrive intact. An unclassified failure shows its own text rather than borrowing a cause. The original message stays as tooltip detail. |
 | **C3** · Never auto-apply an ambiguous match | Choice radios start with **nothing selected**. The total excludes unresolved maps and the pane says how many still need a choice. |
-| **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\moh\main` path, not a euphemism. |
+| **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\openmohaa\<game directory>` path, not a euphemism. |
+| **H13** · Index the whole search path | An expansion session indexes `main` underneath `mainta` or `maintt`, so a base-game map is never reported as missing on a Spearhead or Breakthrough server. |
+| **H14** · Never offer a game the folder has no files for | The **Game** switch lists only the products detected in the folder, and is hidden entirely when there is one. |
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
 | **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. |
 | **H11** · Never call the measured round trip the in-game ping | The column is **Ping** because that is the word players look for, but every explanation is the honest one: the tooltip says "Time for one status request to this server and back, measured once during this check. Not the in-game ping." The figure carries no colour, no bars and no bands — it is a measurement to sort by, not a verdict, for the same reason the list carries no traffic light. |
-| **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favourite says **not in this check** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
+| **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favourite says **not in this check** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. A live row says when it was measured (**Checked at 14:32**) and is dropped outright when a later check finds the server gone. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
 | **S2** · Never change engine files while an affected program is running | Installation and Original/Reborn activation are blocked unless the relevant process query confirms stopped. Unknown is blocking, not permission. |
 | **S5** · Preserve original executables before installing Reborn | Reborn installation retains first-seen originals. Switching changes the active canonical copies and never describes either managed engine as uninstalled. |
 
@@ -255,7 +341,23 @@ platform v1 supports.
 - The server list is a real `<table>` with `<caption>`, `scope="col"` and `aria-sort` — not a grid
   of buttons. Rows are `tabindex="0"` with `aria-selected`.
 - **Keyboard**: `↑`/`↓`/`Home`/`End` move between rows, `Enter` and `Space` activate, `/` focuses
-  search, `Escape` clears it, `F5` or `Ctrl+R` refreshes, `F` stars or unstars the selected server.
+  search, `Escape` clears it, `F5` or `Ctrl+R` refreshes the whole list, `R` checks the selected
+  server on its own, `F` stars or unstars it. The modifier is the difference between one probe and
+  a couple of hundred — which is why `R` must never fire from inside a control that has its own use
+  for the letter.
+- **A control that disables itself on click uses `aria-disabled`, not `disabled`.** Focus cannot be
+  restored to a disabled element after a repaint, so **Check again** — which goes busy the instant
+  it is pressed — would take the caret with it every time. It keeps its place in the tab order and
+  its handler refuses the second press (`canRecheck` in `lib/store.js`, read by both the control and
+  the handler so the two cannot disagree). `.btn[aria-disabled="true"]` is styled exactly like
+  `.btn:disabled`.
+- **A single-server check is announced.** The `role="status"` region reports the check starting, a
+  command that could not run, and a server dropped from the list — otherwise the one interaction
+  with no progress meter, and the one that can remove the row the player is looking at, would be
+  silent. Only the *selected* server is announced; a favourites batch would bury the sweep summary.
+- Bare-letter shortcuts (`/`, `F`, `R`) fire only when the event target is not a form control, not
+  contenteditable, and not inside an open dialog, and only with no Ctrl/Alt/Meta held. `R` on the
+  game `<select>` is that control's own type-ahead, not a re-check.
 - A row contains buttons — the star, and **Check** on an absent row — so the tbody key handler
   **returns early when the event target is a button**. Without that it swallows `Enter` and
   `Space` and the controls work with a mouse and are dead to a keyboard. The cost is that the

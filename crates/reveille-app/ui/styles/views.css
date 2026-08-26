@@ -71,6 +71,26 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* The game switch. Styled like the toolbar's other controls rather than as a heading: it is a
+   choice between three lists, and the label is what says which. */
+.toolbar__game {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toolbar__game select {
+  padding: 7px 28px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--rise);
+  color: var(--ink);
+}
+
+.toolbar__game select:disabled {
+  color: var(--faint);
+}
+
 .toolbar__search {
   flex: 1 1 240px;
   max-width: 340px;
@@ -111,8 +131,14 @@
 .list-pane {
   min-width: 0;
   overflow-y: auto;
-  /* The table lays out to the pane, so it never scrolls sideways: the Needs
-     column must stay visible without the player hunting for it. */
+  /* Reserve the scrollbar's 10px whether or not it is drawn. Every column but
+     Server has a fixed width, so the name column absorbs the whole difference:
+     without this, All (which scrolls) and a short Favourites or History (which
+     does not) laid the same names out at two different widths, and switching
+     scope visibly shifted the column. */
+  scrollbar-gutter: stable;
+  /* The table lays out to the pane, so it never scrolls sideways: no column can
+     end up off the right edge for the player to go hunting for. */
   overflow-x: hidden;
 }
 
@@ -154,6 +180,12 @@
 
 .servers .col-map {
   width: 170px;
+}
+
+/* Wide enough for "Round-Based-Match", the longest label the stock engine sets
+   (gamecvars.cpp:566). A mod may publish anything, so the cell also ellipsises. */
+.servers .col-mode {
+  width: 122px;
 }
 
 .servers .col-ping {
@@ -315,6 +347,19 @@
   white-space: nowrap;
 }
 
+/* The server's own word for what it is running. Set in the text face rather than
+   the data face: it is a label the server wrote, not a figure to compare down the
+   column, and it carries no colour for the same reason Ping does not — a mode is
+   not a verdict on a server. Ellipsised, because a mod may publish any string. */
+.mode-cell {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A measurement, not a verdict: no bars, no green/amber banding. Colour here
    would rank servers for the player the same way the Needs traffic light was
    rejected for doing. Same weight as Map now, so neither reads as the answer. */
@@ -396,6 +441,30 @@
   font-weight: 600;
   line-height: 1.2;
   overflow-wrap: anywhere;
+}
+
+/* A name recalled from the row a check has just dropped. Same reasoning as the list's
+   `--remembered`: the only thing on the pane that came from a past reading is set apart. */
+.detail__title--remembered {
+  font-weight: 500;
+  font-style: italic;
+  color: var(--dim);
+}
+
+/* When this row was measured, and the button that measures it again, over a line for a check that
+   could not run at all. The paragraph keeps its place in the row even when there is no time to
+   show, so the button does not slide left. */
+.detail__freshness {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.detail__freshness-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
 
 .detail__section {
@@ -719,6 +788,34 @@
   color: var(--faint);
 }
 
+/* The game question. A plain radio row rather than cards: there is nothing to say about each
+   option beyond its name, and cards would give three identical boxes equal weight to the engine
+   choice below, which does carry version, size and installed state. */
+.game-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.game-choice legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+.game-choice__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.game-choice label {
+  color: var(--ink);
+}
+
 .engine-cards {
   display: grid;
   gap: var(--space-3);
@@ -782,20 +879,31 @@
 }
 
 /* Narrow windows. The minimum is 920x620, so this only has to survive the
-   detail pane becoming untenable, not a phone. */
-@media (max-width: 1080px) {
-  :root {
-    --detail-width: 330px;
-  }
+   detail pane becoming untenable, not a phone.
 
+   The fixed columns are dropped in order of what a player choosing a server can
+   do without, widest breakpoint first: Runs, then Mode, then Ping. The name is
+   what is being protected — two servers you cannot tell apart cost more than any
+   of the three. */
+@media (max-width: 1200px) {
   .servers .col-runs {
     display: none;
   }
 }
 
-/* Below this the fixed columns leave the server name too narrow to tell two
-   servers apart, and a name you cannot read costs more than a distance you can
-   estimate from the list you already sorted. Ping goes after Runs. */
+@media (max-width: 1080px) {
+  :root {
+    --detail-width: 330px;
+  }
+
+  .servers .col-mode {
+    display: none;
+  }
+}
+
+/* Below this the remaining fixed columns leave the server name too narrow to
+   tell two servers apart, and a name you cannot read costs more than a distance
+   you can estimate from the list you already sorted. */
 @media (max-width: 960px) {
   .servers .col-ping {
     display: none;

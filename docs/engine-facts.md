@@ -64,6 +64,31 @@ Five bytes, **not** Quake 3's four. Sending the plain Q3 header gets silence, wh
 indistinguishable from a firewalled port. Commands: `getstatus`, `getinfo <challenge>`,
 `getchallenge`.
 
+### Gametype (`gamecvars.cpp:499`, `sv_main.c:622,624`, `sv_gamespy.c:163`)
+
+Two different quantities share the name, and only one of them is a label:
+
+```
+g_gametypestring : "Objective-Match"   // the cvar; CVAR_SERVERINFO, so getstatus carries it
+gametype         : "Objective-Match"   // GameSpy \status\ reply — the same string
+gametype         : "4"                 // getinfo reply — the numeric g_gametype, NOT the label
+```
+
+Read `g_gametypestring` from the `getstatus` serverinfo, falling back to the GameSpy `gametype`
+field. Never substitute the numeric `g_gametype`, which lives under the same key in the `getinfo`
+reply.
+
+The stock engine sets the cvar to one of seven labels — `Free-For-All`, `Team-Match`,
+`Round-Based-Match`, `Objective-Match`, `Tug-of-War`, `Liberation`, `Multiplayer`
+(`gamecvars.cpp:560-578`) — but it is an ordinary server cvar and a mod may publish anything.
+Keep it as reported; do not map it onto a fixed set, and do not abbreviate it.
+
+**Measured, 26 Aug 2026** (`just live-discovery`, Allied Assault): all 106 answering servers
+published one, across 16 distinct values. Nine of the sixteen are outside the engine's seven —
+`Freeze-Tag`, `Ticket-Match`, `Gun Game (v2.3)`, `= Death Run: Wipeout  =`,
+`=|LuV|= Freeze-Tag Melt Points` — so a fixed-set mapping would have lost 18 of the 106 servers'
+answers, and the longest value is 30 characters. Every real gametype label is a mod's free text.
+
 ### BSP header
 
 ```
@@ -171,6 +196,49 @@ Lookups are case- **and** separator-insensitive (`FS_FilenameCompare`, `files.cp
 Multiple base paths (basepath, then homepath) are each added in full, so homepath wins.
 
 The index must return **all** providers in this order, not collapse to one.
+
+### 3a. Which game directories, for each of the three games
+
+**An expansion adds a directory; it does not replace `main`.** `FS_Startup` adds
+`com_basegame` — always `main` — and then `fs_basegame` (`files.cpp:3640-3645`), which
+`Com_InitTargetGameWithType` sets per target game (`common.c:3164,3181,3208`):
+
+| Target | `com_gamename` | `fs_basegame` | Directories searched, **highest precedence first** |
+|---|---|---|---|
+| `TG_MOH` | `mohaa` | *(empty)* | `main` |
+| `TG_MOHTA` | `mohaas` | `mainta` | `mainta`, then `main` |
+| `TG_MOHTT` | `mohaab` | `maintt` | `maintt`, then `main` |
+
+Two consequences, both load-bearing:
+
+- **Breakthrough never reads `mainta`.** `fs_basegame` holds one directory, so a Breakthrough
+  client sees `maintt` over `main` and nothing of Spearhead's. The qualification: `FS_Startup`
+  adds a non-empty `fs_game` on top of both (`files.cpp:3647-3650`), so a *server-published mod
+  directory* can still be anything. That is a mod, not the base profile.
+- **Indexing only the expansion directory reports every base-game map as missing.** Spearhead
+  servers run `main` maps constantly. `MapIndex::scan_chain` takes the whole chain, lowest
+  precedence first, and both copies of a shadowed map stay in the provider list.
+
+**What Reveille models, and what it does not.** `platform::content_search_path` resolves the
+chain above against the selected installation and the home path. `FS_InitPathVars`
+(`files.cpp:3562-3573`) also registers `fs_steampath`, `fs_gogpath` and `fs_microsoftstorepath`,
+each added in full for every game directory. A map present only in a *second*, unselected
+installation is therefore loadable by the engine and reported missing by Reveille. This is a
+recorded limit, not an oversight: modelling the other roots means deciding which of several
+installations the player meant, and setup already asked them that.
+
+### 3b. The home path is `%APPDATA%\openmohaa`, not `%APPDATA%\moh`
+
+**Correction, 26 Aug 2026.** `plan.md` cited `q_shared.h:47` for `%APPDATA%\moh`. That define is
+`HOMEPATH_NAME_WIN_MOH`, and it — with `HOMEPATH_NAME_WIN_MOHTA` (`mohta`) and
+`HOMEPATH_NAME_WIN_MOHTT` (`mohtt`) beside it — is **referenced nowhere in the engine**. What
+`Sys_DefaultHomePath` appends is `com_homepath`, empty for a non-demo build
+(`common.c:1769-1771`), and otherwise `HOMEPATH_NAME`, which is `"openmohaa"`
+(`q_shared.h:81`, `sys_win32.c:114-117`).
+
+So there is **one** home path for all three games, with `main`, `mainta` and `maintt` inside it —
+not one per product. Content written to `%APPDATA%\moh\main` is in a directory the engine never
+searches. Retail 1.11/1.12 predates the home path entirely and reads only the installation.
 
 ---
 

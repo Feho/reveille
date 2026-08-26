@@ -72,10 +72,15 @@ limit.
 computed. No test.
 
 ### H8 · Say where files actually went
-**Because** When an install falls back to `%APPDATA%\moh\main`, a player who later wants to
-delete a map must be able to find it.
+**Because** When an install falls back to `%APPDATA%\openmohaa\main`, a player who later wants
+to delete a map must be able to find it.
 **Enforced at** `used_home_fallback` is plumbed to the shell (`main.rs:138,163,691,901`) and the
 real path is printed, not a euphemism.
+**Resolve the destination once per join** `resolve_install_target` *probes*, so it can answer
+differently a second time — a folder locked when the preview ran may be writable when the install
+finishes. `install_and_launch` therefore reports the preview's destination, the one the files were
+actually written to, and re-indexes around it (`install_destination` / `reindex`) rather than
+resolving it again.
 
 ### H9 · A failure is a recorded non-result, never an aborted pass
 **Because** An unreachable server or a failed catalogue lookup is information about that item,
@@ -115,13 +120,81 @@ passed, and drawn in the live table they would read as now. And Reveille observe
 ping gate (S1), and no reply ever tells Reveille the answer.
 **Enforced at** `ui/lib/bookmarks.js` stores an address, a query port and a name and **nothing
 else**, so there is no measurement to render as current; a remembered server the current check did
-not return is drawn by `absentRow` in `ui/views/servers.js` with its name marked *remembered* and
-the words "not in this check", never "offline" and never with figures. History is written only
+not return is drawn by `absentRow` in `ui/views/servers.js` with its name in the *remembered* style
+and the words "not in this check" across every column a figure would have been in, never "offline"
+and never with figures. The row also carried an explicit "remembered name" line for a while; it was
+dropped as redundant, and the rule holds without it because the row says outright that this check
+did not return the server, and the name is the only remembered thing left on it. History is written only
 from `LaunchOutcome::Launched` (`ui/app.js`), never from a refusal, and every label reads
-"Launched". No test — this is a storage-shape and copy rule; `copy-review` is the check.
+"Launched". The storage-shape and copy halves have no test; `copy-review` is the check. The two
+clauses below are guarded, each by one text check over the shell.
 **Not "offline"** A server missing from the sweep was usually never asked: the master returned a
 list and only that list was probed. Only a check that actually ran and failed may say the server
 did not answer, and it carries the recorded reason.
+**Nor a row a later check found gone** A live row's figures were measured once and the pane says
+when, so their age is readable rather than assumed: **Checked at 14:32** for a row asked again on
+its own, **From the check at 14:32** for one the sweep returned, because a sweep's finish time is
+not when any particular row inside it answered. **Check again** re-asks that one server; when it
+gets no answer, the row is dropped from the list rather than left standing, because the check that
+just ran is evidence about now and the figures it replaces have been shown not to be. The selection
+survives so the pane can say what the check found and offer to ask again. A check that could not
+*run* is not a server that did not answer, and says so separately — the last measured figures are
+still the last measured figures. Enforced at `ui/app.js` `check`, which filters the checked address
+out of `state.servers` on a non-result and records `state.checkedAt` on an answer. Test:
+`reveille-app::a_check_that_got_no_answer_drops_the_row_it_was_checking` — a text check over
+`app.js`, for the same reason as the one below.
+**Nor a list swept for another session** The table is the answer to one question — this folder,
+this engine, this game — and nothing on it says which. Re-entering setup can change all three, so
+`state.listSession` records what the rows were swept for and `enterServers` (`ui/app.js`) sweeps
+again whenever it no longer matches, exactly as the toolbar's game switch does. Leaving Spearhead's
+servers on screen under Allied Assault would be the same false currency as a bookmark's old figures:
+those servers were never asked this question, and their compatibility was judged against a different
+search path. Test:
+`reveille-app::the_shell_sweeps_again_when_the_session_the_list_was_swept_for_changed` — a text
+check over `app.js` and `store.js`, because the shell has no test runner; it guards the exact
+regression that shipped, not the behaviour in general.
+
+### H13 · Never index an expansion's directory without the base game underneath it
+**Because** Spearhead and Breakthrough do not replace `main`; the engine adds their directory
+*after* it (`engine-facts.md` §3a). An index built from `mainta` alone would report every
+`main` map on a Spearhead server as missing — a false absence, and one that would send a player
+to download files they already own.
+**Enforced at** `join.rs` `LaunchProfile::search_directories` gives the chain, lowest precedence
+first; `platform::content_search_path` resolves it against the installation and the home path;
+`MapIndex::scan_chain` indexes all of it and keeps every provider, so a shadowed copy is still
+listed under the one the engine loads. Tests:
+`mapindex.rs::an_expansion_directory_shadows_main_without_hiding_it`,
+`mapindex.rs::every_scan_count_accumulates_across_the_chain`,
+`join.rs::an_expansion_reads_main_underneath_its_own_directory`,
+`reveille-platform::an_expansion_search_path_keeps_main_underneath_it`,
+`reveille-platform::the_home_copy_of_a_directory_outranks_the_installed_one`.
+**Known limit** `content_search_path` models the *selected* installation and the home path, not
+`fs_steampath` / `fs_gogpath` / `fs_microsoftstorepath` or a non-empty `fs_game`
+(`files.cpp:3562-3573,3647-3650`). A map present only in a second, unselected installation, or
+only in a server-published mod directory, is loadable by the engine and reported missing here.
+Modelling the other roots means deciding which installation the player meant, which is the
+question setup already asked them.
+**Not symmetrical** Breakthrough reads `maintt` and `main`, never `mainta`: `fs_basegame` holds
+one directory. Do not "tidy" the three chains into a cumulative one.
+
+### H14 · Never offer a game the installation has no files for
+**Because** The three products are sold and installed separately. Browsing Spearhead against an
+install with no `mainta` is not a degraded session, it is a false one: every server's rotation
+would read as unavailable and no client executable exists to launch.
+**Enforced at** `install.rs` `Installation::provides`, and `Installation::playable` — the
+*runnable* subset, which is not `products`: an expansion needs the base game underneath it, so a
+folder with `mainta` and no `main` provides nothing (H13). `installed_maps` in
+`reveille-app/src/main.rs` and `playable_install` in `reveille-cli/src/main.rs` both refuse before
+any directory is probed or any home fallback is created, and the toolbar's game switch and setup's
+game question are built from `playable`, so an unrunnable game is never offered. `launch_client`
+(`reveille-platform`) additionally names the missing program when a spawn fails with `NotFound`.
+Tests: `reveille-app::a_game_the_folder_has_no_files_for_is_refused_before_anything_is_probed`,
+`install.rs::an_expansion_directory_alone_does_not_make_that_expansion_playable`,
+`reveille-platform::an_install_without_the_expansion_client_says_which_program_is_missing`.
+**Never pre-check the program as a path** `Command` resolves a bare name against `PATH` and
+`Path::is_file` does not, so a pre-spawn existence check refuses a client that is installed — the
+CLI's default join client is the bare name `openmohaa`. Classify *after* the spawn attempt. Test:
+`reveille-platform::a_bare_program_name_is_resolved_rather_than_treated_as_a_path`.
 
 ---
 
@@ -231,10 +304,14 @@ carries them so the question does not get re-opened from scratch.
 
 ## Known gaps
 
-H5, H7, H12, C3, E1 and E2 have **no mechanical guard**. They hold only as long as someone is
-looking. H5 and H12 are partly covered by the `copy-review` agent; the others are not covered at
-all, and that is worth knowing before trusting this list as a safety net.
+H5, H7, C3, E1 and E2 have **no mechanical guard**. They hold only as long as someone is
+looking. H5 is partly covered by the `copy-review` agent; the others are not covered at all, and
+that is worth knowing before trusting this list as a safety net.
 
-H12's storage half is stronger than its copy half: `bookmarks.js` never persists a measurement,
-so the stale figure a reviewer would look for does not exist to be rendered. What is unguarded is
-the wording — "not in this check" versus "offline", "Launched" versus "Joined".
+H12 is **partly** guarded, and the split matters. Two of its clauses have a text check each — the
+list swept for another session, and the row a later check found gone. Its storage half needs none:
+`bookmarks.js` never persists a measurement, so the stale figure a reviewer would look for does not
+exist to be rendered. What is unguarded is the wording — "not in this check" versus "offline",
+"Launched" versus "Joined" — and `copy-review` is the check for that. Both text checks guard the
+exact regression that shipped, not the behaviour in general: neither would catch the same rule
+broken in a new place.

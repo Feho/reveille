@@ -155,7 +155,8 @@ volontairement en cliquant la puce du chemin dans la barre de titre.
 bouton primaire `Check this folder` (désactivé tant que le champ est vide), et l'indice
 « The folder holding **main** and the game client. »
 
-Si plusieurs produits sont détectés : « Reveille v1 handles Allied Assault only. »
+Si plusieurs produits sont détectés, ils sont listés (`Allied Assault · Spearhead`) et le
+sélecteur **Game** de la barre d'outils choisit lequel jouer ; Reveille gère les trois.
 
 Le dossier accepté est mémorisé ; au lancement suivant, cet écran est **sauté** silencieusement.
 
@@ -167,7 +168,7 @@ Le dossier accepté est mémorisé ; au lancement suivant, cet écran est **saut
 ┌────────────────────────────────────────────────────────────────────────────────────┐
 │ REVEILLE                                            D:\Jeux\EA GAMES\MOHDA  ◄── puce│
 ├────────────────────────────────────────────────────────────────────────────────────┤
-│ ⌕ Search server names  ☐ Has people  ☐ Hide unavailable maps   ▓▓▓▓▓░░ 78/190 [Stop]│
+│ ⌕ Search server names  ☐ Has people                            ▓▓▓▓▓░░ 78/190 [Stop]│
 ├──────────────────────────────────────────────┬─────────────────────────────────────┤
 │ SERVER          CLIENTS   MAP NOW  PING  RUNS  NEEDS│ SERVER                        │
 │ harzCore          40/64  dm/mohdm6  41 ms 1.11 │  <[TFC]> Objective                 │
@@ -204,17 +205,18 @@ De gauche à droite :
 
 1. **Champ de recherche** — filtre sur le nom d'hôte uniquement, en direct. Raccourci `/` pour y
    aller, `Échap` pour vider et revenir à la liste.
-2. **`Has people`** — bascule ; masque les serveurs à 0 client. Désactivée par défaut.
-3. **`Hide unavailable maps`** — bascule ; masque les serveurs en état `No source`. Désactivée par
-   défaut.
-4. **Zone d'action**, à droite, qui contient soit :
+2. **`Has people`** — bascule ; masque les serveurs à 0 client. Désactivée par défaut. C'est la
+   seule bascule : un `Hide unavailable maps` a existé, puis a été retiré, car il filtrait sur un
+   état que la liste n'affiche plus — des lignes disparaissaient sans que rien à l'écran ne dise
+   pourquoi.
+3. **Zone d'action**, à droite, qui contient soit :
    - **au repos** : un bouton primaire `Find servers` (première fois) ou `Refresh` (ensuite) ;
    - **pendant un balayage** : une jauge + un compteur `78/190` + un bouton `Stop`. Tant que le
      master n'a pas répondu, la jauge est indéterminée et le compteur affiche `contacting master`.
      Après clic sur `Stop`, le bouton devient `Stopping…` et se désactive — les sondes déjà en vol
      doivent encore expirer, et le dire vaut mieux que laisser le bouton paraître inerte.
 
-Les deux bascules et le tri sont **persistés** entre les sessions.
+La bascule et le tri sont **persistés** entre les sessions.
 
 > Il n'existe volontairement **aucun filtre « seulement compatibles »**. Voir §7.1.
 
@@ -373,12 +375,13 @@ sa raison, et les autres continuent.
 
 ### C.8 Après le lancement
 Section `LAUNCHED` / `NOT LAUNCHED` :
-- Succès : « The game is starting », puis « Allied Assault is connecting. Bans, a full server and
-  ping limits are the server's call from here. » — c'est le **seul** endroit où cet avertissement
-  universel est dit, au moment où il s'applique.
+- Succès : « The game is starting », puis « <jeu> is connecting. Bans, a full server and ping
+  limits are the server's call from here. » — le jeu nommé est celui de la session (Allied
+  Assault, Spearhead ou Breakthrough). C'est le **seul** endroit où cet avertissement universel
+  est dit, au moment où il s'applique.
 - `4 files installed into D:\Jeux\EA GAMES\MOHDA\main`.
 - Si le dossier de jeu n'était pas inscriptible : un encart laiton donnant **le vrai chemin de
-  repli** (`%APPDATA%\moh\main`), jamais un euphémisme. Reveille ne déclenche jamais d'élévation
+  repli** (`%APPDATA%\openmohaa\main`), jamais un euphémisme. Reveille ne déclenche jamais d'élévation
   UAC.
 - `Not installed` : la liste des cartes en échec avec leur raison.
 - Un bouton `Back to the check` pour revenir à l'analyse du serveur.

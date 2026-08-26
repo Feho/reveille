@@ -303,10 +303,11 @@ name mapping, which is portable logic and belongs in the core crate, not the pla
   today (plus EA's own app). A `libraryfolders.vdf` walk would serve nobody. Checked 19 Aug 2026.
 - **EA App / Origin is a real path the plan previously omitted.** EA sells War Chest on its own
   store and lists it under EA Play. Caveat reported by users: the Spearhead and Breakthrough
-  expansions do not launch through the EA app. That does not block v1, which targets Allied
-  Assault multiplayer and already tags SH/BT as after-v1 — but it means an EA App install may be
-  AA-only, and `install::identify` must report that from the data directories rather than assume
-  War Chest implies all three.
+  expansions do not launch through the EA app. It means an EA App install may be AA-only, and
+  `install::identify` must report that from the data directories rather than assume War Chest
+  implies all three. **Status, 26 Aug 2026: Spearhead and Breakthrough are in v1** — see
+  "Spearhead and Breakthrough, promoted into v1" below — so this caveat now decides which of the
+  three games such an install can offer, rather than being a note about a deferred feature.
 - Seed the hash→version corpus from real GOG, EA App and retail-disc installs.
 - OpenMoHAA install and update from GitHub Releases. Never silently overwrite a running binary.
   Integrity comes from the API's per-asset `digest` field — see the correction above; there is no
@@ -343,7 +344,8 @@ clippy and fmt clean.
   unless asked for; values above 1 force an unbuffered flush (`common.c:288-293`), and plain
   `logfile 1` buffers so a tail sees nothing until exit. `FS_FOpenFileWrite_HomeData` builds
   `<fs_homedatapath>/<fs_gamedir>/<name>` (`files.cpp:1027-1030`); `Sys_DefaultHomePath`
-  (`sys_win32.c:97-120`) gives `%APPDATA%\moh` (`q_shared.h:47`). Three header lines come from
+  (`sys_win32.c:97-120`) gives `%APPDATA%\openmohaa` — **corrected 26 Aug 2026**, see
+  `engine-facts.md` §3b. Three header lines come from
   shared qcommon code (`common.c:285-288`) and would appear in a client log too:
   `logfile opened on`, `=> game is version`, `=> targeting game ID`. **No client log has ever
   been observed in this project** — the one inspected was the dedicated server's, under a custom
@@ -358,7 +360,7 @@ clippy and fmt clean.
   `3534-3572`).
 
   **Install target: the game directory first, the home path only as a fallback.** An earlier
-  draft of this plan said always write to `%APPDATA%\moh\main`. That was over-corrected. Dropping
+  draft of this plan said always write to the home path. That was over-corrected. Dropping
   pk3s into `<install>\main\` is what the community does, what every guide says, and where a
   user expects to find and delete them later — confirmed by the project owner from their own
   Windows machine. It also works on retail 1.11/1.12, which predates the home-path split and has
@@ -367,9 +369,10 @@ clippy and fmt clean.
   1. Probe whether `<install>\main` is writable — do not infer it from the path string.
   2. If it is, install there. This is the normal case; standalone GOG defaults to
      `C:\GOG Games\...`, which needs no elevation.
-  3. If it is not — the `C:\Program Files (x86)` case — fall back to `%APPDATA%\moh\main` on
-     OpenMoHAA, and say plainly in the UI where the files went. Never raise a UAC prompt
-     mid-journey; the ten-minute criterion cannot absorb one.
+  3. If it is not — the `C:\Program Files (x86)` case — fall back to
+     `%APPDATA%\openmohaa\<game directory>` on OpenMoHAA, and say plainly in the UI where the
+     files went. Never raise a UAC prompt mid-journey; the ten-minute criterion cannot absorb
+     one.
   4. On retail there is no fallback. If the directory is unwritable, that is a real blocker and
      must be reported as one, not worked around silently.
 
@@ -456,7 +459,7 @@ The Tauri shell links `reveille-core` directly and implements first-run detectio
 selection, the live server browser, and join preflight. It carries the four state names unchanged,
 sorts only by reported human clients, renders bots separately and additively, offers explicit
 choices without auto-applying an ambiguous result, records per-map failures, and displays the
-actual destination whenever OpenMoHAA falls back to `%APPDATA%\moh\main`. The development shell
+actual destination whenever OpenMoHAA falls back to its home path. The development shell
 builds and opens on this Windows machine. Default tests remain offline: 66 pass and the three
 live network checks remain ignored; workspace clippy and fmt are clean.
 
@@ -787,6 +790,78 @@ and its three distinct resolution outcomes, and the 19 Aug population snapshot.
 `cargo clippy -- -D warnings` and `cargo fmt --check` clean throughout. CI has run on ubuntu
 and `windows-latest` from commit 1; from `d4812eb` the ubuntu leg covers the portable crates and
 the Windows leg covers the whole workspace, for the reasons in the M6 review.
+
+## Spearhead and Breakthrough, promoted into v1
+
+**Decision, 26 Aug 2026, by the project owner.** Allied Assault, Spearhead and Breakthrough are
+all three v1. Earlier notes tag SH/BT as after-v1; that is superseded, and the EA App bullet in
+M5 now reads as "which of the three an install can offer" rather than a note about a deferred
+feature.
+
+Most of the pipeline already carried them, and had from M4: `TargetGame` has three variants with
+their index-aligned GameSpy keys, `LaunchProfile` maps them to `com_target_game` 0/1/2 and to
+`main`/`mainta`/`maintt`, `install::identify` reports products from the data directories, the
+Reborn package selector is already four-way on those products, and the CLI has had `--game` since
+M4. What was missing was the shell — which hard-coded `TargetGame::AlliedAssault` in four places —
+and one engine fact nobody had needed until now.
+
+**The fact that had to be checked: an expansion adds a directory, it does not replace `main`.**
+`FS_Startup` adds `com_basegame` and *then* `fs_basegame` (`files.cpp:3640-3645`), and
+`Com_InitTargetGameWithType` sets `fs_basegame` to `mainta` or `maintt` (`common.c:3181,3208`).
+So Spearhead searches `mainta` over `main`, Breakthrough searches `maintt` over `main`, and
+**Breakthrough never reads `mainta`** — `fs_basegame` holds one directory, so the three chains
+are not cumulative. Both front ends had been indexing exactly one game directory, which for an
+expansion would have reported every base-game map on a Spearhead server as missing. `MapIndex`
+grew `scan_chain`, `LaunchProfile` grew `search_directories`, and `platform` grew
+`content_search_path` to resolve that chain against the installation and the home path. Recorded
+as rule **H13**.
+
+**Correction found while doing it: the OpenMoHAA home path is `%APPDATA%\openmohaa`, not
+`%APPDATA%\moh`.** This plan cited `q_shared.h:47` — `HOMEPATH_NAME_WIN_MOH` — which, with the
+`mohta` and `mohtt` defines beside it, is referenced nowhere in the engine. `Sys_DefaultHomePath`
+appends `com_homepath`, empty for a non-demo build, and otherwise `HOMEPATH_NAME`, which is
+`"openmohaa"` (`sys_win32.c:114-117`, `q_shared.h:81`, `common.c:1769-1771`). The fallback
+install target was therefore writing to a directory the engine never searches — a pre-existing
+bug on the Allied Assault path too, not something the expansions introduced. Fixed in
+`reveille-platform` as one named constant with the citation beside it; details in
+`engine-facts.md` §3b. It is worth noting *how* it survived: the citation was to a plausible
+define with the right name, and nothing checked that the engine actually used it. **Cite the
+reference site, not the definition site**, when both exist.
+
+**Reviewed by Codex, 26 Aug 2026 — a code pass and a UI/UX pass.** It re-derived the four
+load-bearing engine claims from the source rather than taking them from this file, and confirmed
+all four, including the `%APPDATA%\openmohaa` correction. Eight findings were accepted and fixed
+in the same change. Three are worth keeping here, because each is a *kind* of mistake rather than
+a typo:
+
+- **A pre-spawn `Path::is_file` check is not the same question as "can this be launched".**
+  `Command` resolves a bare program name against `PATH`; `Path::is_file` does not, and the CLI's
+  default join client is the bare name `openmohaa`. A check added to produce a *better error* had
+  turned a working launch into a refusal. The classification now happens after the spawn attempt,
+  from `io::ErrorKind::NotFound`. Recorded under **H14**.
+- **A probe answered twice can answer differently.** `install_and_launch` downloaded into the
+  preview's destination and then resolved the write target a second time to report it — so a
+  folder that was locked during the preview and writable afterwards would have been described as
+  the destination when the files were in the home path. H8 is about the directory files actually
+  went to, and that is knowable only once. Recorded under **H8**.
+- **A rule needs its own edge case tested, not its happy path.** `provides` accepted a folder with
+  `mainta` and no `main` — the exact state H13 forbids — because it asked only whether the
+  expansion's own directory was there. `Installation::playable` now names the runnable subset and
+  both front ends and the interface build their choices from it. The parallel UI finding was the
+  same shape: the "switch to Spearhead" guidance could be shown to a folder that has no Spearhead,
+  because bookmarks are global and outlive the install they were saved under.
+
+The UI pass changed one decision: **the game is chosen in setup when the folder can run more than
+one**, not only in the toolbar. The reason is mechanical rather than aesthetic — Continue starts a
+sweep immediately, and the toolbar's switch is disabled while a sweep runs, so setup was pointing
+the player at a control that was greyed out at exactly the moment they were told to use it.
+
+**What is deliberately not done.** Nothing tries to infer that an install has Spearhead from a
+War Chest product name or an executable; `Installation::provides` asks the data directories and
+nothing else (rule **H14**, and `registry.rs::war_chest_name_does_not_infer_missing_expansions`
+was already guarding the same principle from the discovery side). And the shell offers no
+"all games" list: three master registrations mean three sweeps, and merging them would put rows
+in one table that no single client can join.
 
 ## Scope decided after v1 was drafted
 
