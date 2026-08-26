@@ -306,6 +306,38 @@
   color: var(--faint);
 }
 
+/* The head of the absent block. It is a control, not a measurement, so it takes the text face and
+   no colour; the caret and `aria-expanded` carry the state. */
+.row-disclosure td {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.disclosure:hover {
+  color: var(--ink);
+}
+
+/* The one thing on the row that has to be readable across the table at a glance: it is the whole
+   difference between rows folded away and rows that are not there. `line-height: 0` keeps the
+   glyph from setting the row height. */
+.disclosure__caret {
+  color: var(--faint);
+  font-size: 32px;
+  line-height: 0;
+}
+
 /* A remembered server this check did not return. Nothing in it is a measurement, so nothing in
    it is styled like one — no colour, and the cell holds a sentence and a button instead. */
 .row-absent td {

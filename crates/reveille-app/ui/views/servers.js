@@ -13,7 +13,7 @@
 // server costs is said in the detail pane, where there is room to say it in the
 // four canonical state names rather than a coloured word.
 
-import { el, fill } from "../lib/dom.js";
+import { el, fill, preserveFocus } from "../lib/dom.js";
 import {
   gameType,
   launchedLabel,
@@ -35,7 +35,9 @@ import {
   GAME_LABELS,
   SCOPES,
   playableGames,
+  savedEntries,
   saveFilters,
+  scopedAbsent,
   scopedRows,
   state,
   update,
@@ -347,15 +349,15 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     // Read the starred set once. Asking per row would parse the store a hundred-odd times a paint.
     const starred = favouriteAddresses();
     const launches = state.scope === "history" ? historyByAddress() : null;
-    fill(
-      tbody,
-      items.length
-        ? items.map((item) =>
-            item.kind === "live"
-              ? row(item.row, starred, launches, onSelect)
-              : absentRow(item.entry, starred, launches, lastColumns, onCheck, onGame),
-          )
-        : emptyRow(lastColumns),
+    const build = (item) => {
+      if (item.kind === "live") return row(item.row, starred, launches, onSelect);
+      if (item.kind === "disclosure") return disclosureRow(item.count, lastColumns);
+      return absentRow(item.entry, starred, launches, lastColumns, onCheck, onGame);
+    };
+    // Opening the absent block repaints the table the button that opened it lives in, and a
+    // keyboard would be left on nothing. The disclosure carries a focus key so it comes back.
+    preserveFocus(tbody, () =>
+      fill(tbody, items.length ? items.map(build) : emptyRow(lastColumns)),
     );
     syncSelection();
   };
@@ -564,6 +566,70 @@ function row(item, starred, launches, onSelect) {
       "td",
       { className: "col-runs" },
       el("span", { className: "runs-cell", title: item.server.version ?? "" }, shortVersion(item.server)),
+    ),
+  );
+}
+
+/** The scope's own word for what it holds, singular or plural. */
+const SAVED_NOUNS = {
+  favourites: ["favourite", "favourites"],
+  history: ["launched server", "launched servers"],
+};
+
+function savedNoun(count = 0) {
+  const [one, many] = SAVED_NOUNS[state.scope] ?? ["server", "servers"];
+  return count === 1 ? one : many;
+}
+
+/**
+ * The head of the absent block: how many remembered entries this check did not return, and the
+ * control that folds them out of the way.
+ *
+ * Absent entries used to sit open at the foot of Favourites and History. On a folder with more
+ * than one game that is where most of them live for ever — Allied Assault, Spearhead and
+ * Breakthrough register with the master separately, so a server starred under one of them is
+ * never in another's list and its Check button can only ever find the same thing. Twenty rows of
+ * "not in this check" under three that answered reads as a broken list.
+ *
+ * Shut, this is not a filter with an invisible effect (docs/ui.md §2.1, rule H15): the count is on
+ * screen, in the row where the entries would have been, and one click brings them back. Nothing is
+ * classified, guessed or dropped — the criterion is the same one the rows themselves state, which
+ * this check demonstrably did not return.
+ */
+function disclosureRow(count, columns) {
+  const open = state.showAbsent;
+  // Naming the game earns its place only where the folder has more than one: it is why most of
+  // these entries can never answer. On a single-game folder it is noise, and the game select is
+  // hidden there for the same reason.
+  const check =
+    playableGames(state.install).length > 1
+      ? `this ${GAME_LABELS[state.game] ?? state.game} check`
+      : "this check";
+  return el(
+    "tr",
+    // No `data-address`: there is nothing here to select or preview.
+    { className: "row-disclosure" },
+    el(
+      "td",
+      { colspan: String(columns) },
+      el(
+        "button",
+        {
+          type: "button",
+          className: "disclosure",
+          "aria-expanded": open ? "true" : "false",
+          dataset: { focusKey: "absent-disclosure" },
+          title:
+            "These weren't in this check's list, so they were never asked. Servers saved under another game always end up here.",
+          onclick: () =>
+            update((next) => {
+              next.showAbsent = !next.showAbsent;
+              saveFilters();
+            }),
+        },
+        el("span", { className: "disclosure__caret", "aria-hidden": "true" }, open ? "▾" : "▸"),
+        `${count} ${savedNoun(count)} not in ${check}`,
+      ),
     ),
   );
 }
@@ -789,12 +855,17 @@ function statusbarContents(onShowNonResults, onCheck) {
 /**
  * The status bar for a saved scope. It counts what is saved and how much of it this check
  * returned, rather than repeating the sweep's totals, which are about a different population.
+ *
+ * This count is taken against the whole saved set, search box or no search box: it is a statement
+ * about the check, not about the current query. The disclosure row counts what it is actually
+ * hiding, which is the filtered set, so the two answer different questions and say so.
  */
 function scopedStatusbar(onCheck) {
-  const saved = state.scope === "favourites" ? favourites() : history();
+  const saved = savedEntries();
   const present = new Set(state.servers.map((row) => row.address));
-  const absent = saved.filter((entry) => !present.has(entry.address));
-  const noun = state.scope === "favourites" ? "favourite" : "launched server";
+  const missing = saved.filter((entry) => !present.has(entry.address));
+  // The button acts on rows, so it takes the rows the block is showing.
+  const shown = scopedAbsent();
 
   return [
     // "0 of 0" is noise; the empty state in the table already says what is going on.
@@ -802,18 +873,22 @@ function scopedStatusbar(onCheck) {
       el(
         "span",
         null,
-        el("strong", null, String(saved.length - absent.length)),
-        ` of ${saved.length} ${noun}${saved.length === 1 ? "" : "s"} in this check`,
+        el("strong", null, String(saved.length - missing.length)),
+        ` of ${saved.length} ${savedNoun(saved.length)} in this check`,
       ),
-    absent.length > 0 &&
+    // Offered only while the absent block is open. Shut, the whole of its effect — absent rows
+    // changing what they say — would happen where nobody could see it, which is the one thing a
+    // control in this interface may not do (docs/ui.md §2.1).
+    state.showAbsent &&
+      shown.length > 0 &&
       el(
         "button",
         {
           type: "button",
           title: "Ask each of these servers directly, one request each.",
-          onclick: () => onCheck(absent),
+          onclick: () => onCheck(shown),
         },
-        `Check the other ${absent.length}`,
+        `Check the other ${shown.length}`,
       ),
     el("span", { className: "statusbar__spacer" }),
     state.scope === "history" && saved.length > 0 && clearHistoryButton(),
@@ -875,11 +950,18 @@ function liveText() {
   const single = singleCheckText();
   if (single) return single;
   if (state.scope !== "all") {
-    const saved = state.scope === "favourites" ? favourites() : history();
+    const saved = savedEntries();
     const present = new Set(state.servers.map((row) => row.address));
     const found = saved.filter((entry) => present.has(entry.address)).length;
-    const noun = state.scope === "favourites" ? "favourites" : "launched servers";
-    return `Showing ${noun}. ${found} of ${saved.length} answered the last check.`;
+    const folded = state.showAbsent ? 0 : scopedAbsent().length;
+    return [
+      `Showing ${savedNoun()}. ${found} of ${saved.length} answered the last check.`,
+      // The disclosure says this on screen; a screen reader gets it here rather than only on
+      // reaching the row.
+      folded > 0 && `The ${folded} not in this check are folded away.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
   if (state.browse.running) {
     return `Checking servers, ${state.browse.probed} of ${state.browse.inspected} done, ${state.browse.answered} answered.`;

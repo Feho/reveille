@@ -92,6 +92,14 @@ export const state = {
   sort: { column: "clients", direction: "desc" },
   /** Which population the table lists: every answering server, the starred ones, or the launched ones. */
   scope: "all",
+  /**
+   * Whether a saved scope's absent block is open.
+   *
+   * Shut by default. What it hides is stated on the disclosure that hides it, so a player can see
+   * that entries are folded away and how many (H15) — this is not a filter with an invisible
+   * effect, which is what got the old "Hide unavailable maps" toggle removed (docs/ui.md §2.1).
+   */
+  showAbsent: false,
 
   /**
    * What a single-server check found, keyed by address. A remembered server absent from the
@@ -235,7 +243,13 @@ export function saveFilters() {
   try {
     localStorage.setItem(
       FILTERS_KEY,
-      JSON.stringify({ ...state.filters, sort: state.sort, scope: state.scope, query: "" }),
+      JSON.stringify({
+        ...state.filters,
+        sort: state.sort,
+        scope: state.scope,
+        showAbsent: state.showAbsent,
+        query: "",
+      }),
     );
   } catch {
     // Not worth surfacing.
@@ -249,6 +263,7 @@ export function loadFilters() {
     state.filters = { query: "", hasPeople: !!saved.hasPeople };
     if (saved.sort?.column) state.sort = saved.sort;
     if (SCOPES.includes(saved.scope)) state.scope = saved.scope;
+    state.showAbsent = !!saved.showAbsent;
   } catch {
     // Ignore a corrupt preference rather than refusing to start.
   }
@@ -298,20 +313,19 @@ function sortRows(rows) {
   });
 }
 
+/** The entries a saved scope draws from: the starred ones, or the launched ones. */
+export function savedEntries() {
+  return state.scope === "favourites" ? favourites() : history();
+}
+
 /**
- * What the table lists for the current scope, tagged so the view does not have to work out
- * which kind of row it is holding.
+ * Split a saved scope into what this check returned and what it did not, after the search box.
  *
- * A remembered server the current sweep did not return is **not** dropped and **not** drawn with
- * the figures it had last time. It comes back as `absent`, carrying only its address and the name
- * it was starred under, and the view says so (docs/rules.md H12). Absent entries always follow the
- * live rows: there is nothing to sort them by.
+ * One pass, read by everything that counts either half — the table, the status bar and the live
+ * region — so the three cannot disagree about how many entries are in each.
  */
-export function scopedRows() {
-  if (state.scope === "all") {
-    return visibleServers().map((row) => ({ kind: "live", address: row.address, row }));
-  }
-  const remembered = state.scope === "favourites" ? favourites() : history();
+function partitionScope() {
+  const remembered = savedEntries();
   const live = new Map(state.servers.map((row) => [row.address, row]));
   const query = state.filters.query.trim().toLowerCase();
 
@@ -332,9 +346,46 @@ export function scopedRows() {
     }
     absent.push(entry);
   }
+  return { rows, absent };
+}
+
+/** The remembered entries in this scope that the current check did not return. */
+export function scopedAbsent() {
+  if (state.scope === "all") return [];
+  return partitionScope().absent;
+}
+
+/**
+ * What the table lists for the current scope, tagged so the view does not have to work out
+ * which kind of row it is holding.
+ *
+ * A remembered server the current sweep did not return is **not** dropped and **not** drawn with
+ * the figures it had last time. It comes back as `absent`, carrying only its address and the name
+ * it was starred under, and the view says so (docs/rules.md H12). Absent entries always follow the
+ * live rows: there is nothing to sort them by.
+ *
+ * They are also **collapsed behind a disclosure that states how many there are** (H15). Each of
+ * the three games registers with the master separately, so a server starred while browsing another
+ * one can never appear in this check and would otherwise sit in the list for ever, unanswerable —
+ * often outnumbering the rows that did answer. The `disclosure` item is emitted whenever there is
+ * anything behind it, open or shut, so the count is on screen either way: rows may be folded away,
+ * never silently dropped.
+ */
+export function scopedRows() {
+  if (state.scope === "all") {
+    return visibleServers().map((row) => ({ kind: "live", address: row.address, row }));
+  }
+  const { rows, absent } = partitionScope();
+  const listed = sortRows(rows).map((row) => ({ kind: "live", address: row.address, row }));
+  if (!absent.length) return listed;
   return [
-    ...sortRows(rows).map((row) => ({ kind: "live", address: row.address, row })),
-    ...absent.map((entry) => ({ kind: "absent", address: entry.address, entry })),
+    ...listed,
+    // The count and the open state ride in `address` because that is what the view's row
+    // signature hashes: without them, opening the block would not repaint the table.
+    { kind: "disclosure", address: `${absent.length}:${state.showAbsent}`, count: absent.length },
+    ...(state.showAbsent
+      ? absent.map((entry) => ({ kind: "absent", address: entry.address, entry }))
+      : []),
   ];
 }
 

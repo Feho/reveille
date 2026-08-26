@@ -196,6 +196,30 @@ Tests: `reveille-app::a_game_the_folder_has_no_files_for_is_refused_before_anyth
 CLI's default join client is the bare name `openmohaa`. Classify *after* the spawn attempt. Test:
 `reveille-platform::a_bare_program_name_is_resolved_rather_than_treated_as_a_path`.
 
+### H15 · Never fold a remembered entry away without stating how many are folded
+**Because** Favourites and History are collapsed by default down to what the current check
+returned, because a folder with more than one game fills them with entries that can never answer:
+the three register with the master separately, so a server saved under Spearhead is not in Allied
+Assault's list and its **Check** can only ever find the same thing. Twenty rows of "not in this
+check" above three that answered reads as a broken list. But a fold that does not say what it is
+folding is a filter with an invisible effect, which is exactly what got **Hide unavailable maps**
+removed (`ui.md` §2.1) — the player cannot judge a control whose result is off screen.
+**Nor may it classify** Reveille does not know which game a saved address runs. A bookmark is an
+address (H12), and the game it was saved under is a fact about a past moment; folding on a stored
+or re-stamped "last seen under Spearhead" would hide a server that has since moved games under the
+game it no longer runs. The criterion is the one the rows themselves already state and that this
+check demonstrably established: **it was not in this check**.
+**Enforced at** `ui/lib/store.js` `scopedRows` emits the `disclosure` item whenever the absent set
+is non-empty — open or shut, so the count is on screen either way — and only then omits the rows
+behind it. `ui/views/servers.js` `disclosureRow` draws it with `aria-expanded`, in the row where
+those entries would have been, and `liveText` repeats the folded count for a screen reader.
+`scopedStatusbar` withholds **Check the other N** while the block is shut, because the whole of
+that button's effect is inside the block. `ui/app.js` `autoCheckFavourites` waits for the same
+thing, for the same reason. Test:
+`reveille-app::folded_remembered_entries_always_state_their_count` — a text check over `store.js`
+and `servers.js`, for the same reason as the ones under H12: the shell has no test runner and the
+failure would be silent.
+
 ---
 
 ## S — Safety: what Reveille may do to a machine or a server

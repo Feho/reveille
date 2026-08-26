@@ -485,14 +485,19 @@ function sameJoinQuestion(before, after) {
 }
 
 /**
- * Check the favourites this sweep did not return, once per sweep.
+ * Check the favourites this sweep did not return, once per sweep, while they are on screen.
  *
- * Without it, opening Favourites after a refresh shows a list of servers with no data and a row
- * of buttons to press. Once per sweep, and only for the ones actually missing, keeps it to a
+ * Without it, opening the absent block after a refresh shows a list of servers with no data and a
+ * row of buttons to press. Once per sweep, and only for the ones actually missing, keeps it to a
  * handful of requests against a sweep that just sent a couple of hundred.
+ *
+ * It waits for the block to be open. Collapsed, these probes would answer a question nobody asked
+ * and write their answers where nobody can read them — and on a multi-game folder most of them go
+ * to servers that were saved under another game and can only ever say the same thing. Opening the
+ * block notifies, so the check runs then instead.
  */
 function autoCheckFavourites() {
-  if (state.scope !== "favourites") return;
+  if (state.scope !== "favourites" || !state.showAbsent) return;
   if (state.browse.running || !state.browse.completedAt) return;
   if (state.autoCheckedAt === state.browse.completedAt) return;
   const present = new Set(state.servers.map((row) => row.address));

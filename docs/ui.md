@@ -187,7 +187,29 @@ There is **one** primary surface. The three-screen wizard was removed.
   none. The button runs `check_server`, the same probe the sweep runs at
   the same deadline; a server that answers becomes an ordinary row and is joinable, and one that
   does not says **did not answer** with the recorded reason in its `title`. Favourites the sweep
-  missed are checked once automatically per completed sweep, on first entry into that scope.
+  missed are checked once automatically per completed sweep, on first entry into that scope **with
+  the absent block open** — collapsed, those probes would write their answers where nobody can
+  read them.
+- **The absent rows are collapsed behind a disclosure that counts them**, and that is the default
+  (rule **H15**). On a folder with more than one game they otherwise dominate the two saved
+  scopes for ever: the three games register with the master separately, so a server starred while
+  browsing Spearhead is never in an Allied Assault check and its **Check** can only ever find the
+  same thing. The disclosure sits in the row where those entries would have been and reads
+  **▸ 8 favourites not in this Spearhead check** — the game is named only where the folder has more
+  than one, by the same rule that hides the game select. Open, it reads **▾** and the rows follow
+  unchanged.
+  **This is a fold, not a filter, and it must stay one.** The count is on screen whether the block
+  is open or shut, so nothing vanishes for a reason nothing on screen states — the distinction that
+  removed **Hide unavailable maps** (§2.1). And it must never fold on a *stored game*: Reveille
+  does not know which game a saved address runs, a bookmark is an address (**H12**), and a
+  remembered "last seen under Spearhead" would hide a server that has since moved under the very
+  game it now runs. The criterion is the one the rows already state — this check did not return
+  them.
+  **Check the other N** in the status bar is drawn only while the block is open, because the whole
+  of its effect is inside the block. The status bar's own count (**3 of 11 favourites in this
+  check**) is taken against everything saved, search box or no search box; the disclosure counts
+  what it is actually hiding. The two answer different questions, which is why they can differ
+  while a search is typed.
 - **Detail pane** (`views/join.js`) — selection previews the join *in place*. No
   browser → join → back navigation; servers stay comparable; the list never disappears.
 - **The selected server can be checked again on its own.** Under the address the pane says when the

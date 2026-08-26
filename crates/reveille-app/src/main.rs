@@ -2083,6 +2083,34 @@ mod tests {
     }
 
     #[test]
+    fn folded_remembered_entries_always_state_their_count() {
+        // The same text check as the two above, guarding H15. Favourites and History fold the
+        // entries this check did not return behind a disclosure, and the one thing that keeps a
+        // fold from being an invisible filter is that the count is drawn whether it is open or
+        // shut. A regression here is silent: rows simply stop being there.
+        let store = include_str!("../ui/lib/store.js");
+
+        assert!(
+            store.contains(r#"{ kind: "disclosure", address: `${absent.length}:${state.showAbsent}`, count: absent.length },"#),
+            "ui/lib/store.js: the disclosure must be emitted with its count, whatever the open state"
+        );
+        assert!(
+            store.contains("...(state.showAbsent"),
+            "ui/lib/store.js: only the absent rows are conditional on the block being open"
+        );
+
+        let servers = include_str!("../ui/views/servers.js");
+        assert!(
+            servers.contains("`${count} ${savedNoun(count)} not in ${check}`"),
+            "ui/views/servers.js: the disclosure must say how many entries it is folding away"
+        );
+        assert!(
+            servers.contains(r#""aria-expanded": open ? "true" : "false","#),
+            "ui/views/servers.js: the disclosure must publish its open state"
+        );
+    }
+
+    #[test]
     fn a_check_carries_forward_what_it_knows_about_a_row_already_dropped() {
         // Found by review, and it made the one control on screen destroy the pane holding it: the
         // second "Check again" on a dropped server recomputed the remembered name from a list the
