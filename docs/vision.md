@@ -1,0 +1,3 @@
+Nothing is set in stone. I'm agile. I'm a solo dev who wants to build an easy to use tool for beginners (also useful for regular MOHAA players). It could even be useful for myself: install/update the MOHAA client (OpenMoHAA or any future client) in one click, join a server with custom maps missing on disk, download and manage the custom maps and mods (as easy as installing extensions in VS Code).
+  Basically: eliminate any friction that most players encounter.
+  The user interface should always be as clear as possible, with short, easy-to-understand labels and text that even beginners can understand.

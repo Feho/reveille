@@ -7,6 +7,7 @@ import {
   openMohaaStatus, pickInstallFolder, selectEngine,
 } from "../lib/api.js";
 import { bytes, displayPath } from "../lib/format.js";
+import { glossaryButton } from "../lib/glossary.js";
 import {
   GAME_LABELS, defaultGame, notify, playableGames, recallEngine, rememberEngine, rememberGame,
   rememberInstall, state,
@@ -55,6 +56,7 @@ function card(render, onReady) {
       el("button", { className: "btn btn--primary btn--block", disabled: view.busy || Boolean(view.installing) || !available, onclick: () => void accept(view.candidate, onReady, render) }, available ? "Continue to servers" : "Choose an available engine"),
       el("button", { className: "btn btn--ghost", disabled: view.busy || Boolean(view.installing), onclick: () => { resetCandidate(); view.message = "Pick your game folder."; render(); } }, "Choose another folder")),
     view.error && el("p", { className: "error", role: "alert" }, view.error),
+    el("div", { className: "setup__foot" }, glossaryButton()),
   ));
 }
 
@@ -228,11 +230,43 @@ async function stopInstall(render) {
   catch (error) { view.error = errorText(error); view.stopping = false; render(); }
 }
 
+/**
+ * What Reveille needs on disk, said before the player spends any effort looking for it.
+ *
+ * Setup offers to install a game *program* — OpenMoHAA or Reborn. It cannot install the game
+ * *data*, which `install::identify` requires, and nothing on screen used to draw that line. A
+ * player pointing at an empty folder got "No Medal of Honor installation there" and no way to
+ * work out why, which is the hardest kind of wall: no error, no next action, at second zero
+ * (docs/friction.md F1, docs/design-review.md F2).
+ *
+ * Doomseeker settled the same boundary for the same kind of player years ago — it fetches the
+ * optional content and states the base game as a precondition up front, rather than as a failure
+ * halfway through (docs/ux-standards.md §7, prior art).
+ */
+function prerequisite() {
+  return el(
+    "div",
+    { className: "setup__needs" },
+    el(
+      "p",
+      null,
+      "Reveille needs the game files from your own copy of Medal of Honor: a disc install, GOG, Steam or the EA App.",
+    ),
+    el(
+      "p",
+      { className: "quiet" },
+      "Reveille can install the game program for you, but not the game itself. Look for the folder that contains a ",
+      el("span", { className: "data" }, "main"),
+      " folder.",
+    ),
+  );
+}
+
 function manualBlock(render) {
-  return el("div", { className: "stack" }, el("div", { className: "setup__row" },
+  return el("div", { className: "stack" }, prerequisite(), el("div", { className: "setup__row" },
     el("label", { className: "field", for: "install-path" }, el("input", { id: "install-path", type: "text", autocomplete: "off", spellcheck: false, placeholder: "D:\\Games\\MOHAA", value: view.manualPath, oninput: (event) => { view.manualPath = event.target.value; }, onkeydown: (event) => { if (event.key === "Enter") void check(view.manualPath, render); } })),
     el("button", { className: "btn", onclick: () => void browse(render) }, "Browse…")),
-    el("button", { className: "btn btn--primary btn--block", onclick: () => void check(view.manualPath, render), disabled: view.manualPath.trim() === "" }, "Check this folder"));
+    el("button", { className: "btn btn--primary btn--block", onclick: () => void check(view.manualPath, render), disabled: view.manualPath.trim() === "" }, "Use this folder"));
 }
 
 async function browse(render) {
@@ -246,7 +280,7 @@ async function check(path, render) {
   try {
     const install = await detectInstall(path);
     if (install) { adoptCandidate(install); view.message = "Read from the game files on disk."; await loadOverview(install, render); }
-    else { resetCandidate(); view.message = "No Medal of Honor installation there."; }
+    else { resetCandidate(); view.message = "That folder holds no Medal of Honor game files."; }
   } catch (error) { view.error = errorText(error); view.message = "That folder could not be read."; }
   finally { view.busy = false; render(); }
 }

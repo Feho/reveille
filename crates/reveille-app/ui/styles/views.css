@@ -167,7 +167,7 @@
 }
 
 /* The Server name takes whatever is left; every other column is sized to its
-   content so nothing can push Needs out of view. */
+   content, so no cell's contents can push another column out of view. */
 .servers .col-star {
   width: 38px;
   padding-left: var(--space-3);
@@ -393,8 +393,8 @@
 }
 
 /* A measurement, not a verdict: no bars, no green/amber banding. Colour here
-   would rank servers for the player the same way the Needs traffic light was
-   rejected for doing. Same weight as Map now, so neither reads as the answer. */
+   would rank servers for the player the same way the traffic light docs/ui.md
+   §2.1 rejects does. Same weight as Map, so neither reads as the answer. */
 .ping-cell {
   display: block;
   font-family: var(--face-data);
@@ -404,6 +404,8 @@
   white-space: nowrap;
 }
 
+/* The build string, kept quiet: it is the one thing here nobody reads to choose a
+   server, and the first column a narrow window gives up. */
 .runs-cell {
   display: block;
   font-family: var(--face-data);
@@ -412,6 +414,39 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The ping gate, styled as the game switch is: a toolbar control, not a heading. */
+.toolbar__ping {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toolbar__ping select {
+  padding: 7px 24px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--rise);
+  color: var(--ink);
+}
+
+/* The row that says the list below it is a past reading (docs/ux-standards.md §4.5).
+   Brass, like every other note that changes what the player should believe, and
+   never red: nothing here failed, it simply has not been asked again. */
+.row-stale td {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid var(--brass);
+  background: var(--rise);
+  color: var(--dim);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.row-stale__mark {
+  margin-right: var(--space-2);
+  color: var(--brass);
 }
 
 /* Status bar ---------------------------------------------------------------- */
@@ -524,19 +559,14 @@
   color: var(--brass);
 }
 
-/* Rotation groups ---------------------------------------------------------- */
+/* Map rows ----------------------------------------------------------------- */
+/* What is left of the rotation listing removed on 27 Aug 2026: the maps that need
+   a source picked, and the ones an install could not fetch. Both are lists of
+   individual maps the player has something to do about. */
 
 .rot {
   display: grid;
   gap: var(--space-1);
-}
-
-.rot__group {
-  margin-top: var(--space-2);
-}
-
-.rot__group:first-child {
-  margin-top: 0;
 }
 
 .rot__row {
@@ -554,20 +584,8 @@
   font-size: var(--text-xs);
 }
 
-.rot__mark--ok {
-  color: var(--ok-text);
-}
-
-.rot__mark--get {
-  color: var(--brass);
-}
-
 .rot__mark--choose {
   color: var(--warn-text);
-}
-
-.rot__mark--none {
-  color: var(--bad-text);
 }
 
 .rot__name {
@@ -586,14 +604,6 @@
   font-family: var(--face-data);
   font-size: var(--text-xs);
   color: var(--faint);
-}
-
-.rot__file {
-  padding-left: 20px;
-  font-family: var(--face-data);
-  font-size: var(--text-xs);
-  color: var(--faint);
-  overflow-wrap: anywhere;
 }
 
 /* Candidate choices -------------------------------------------------------- */
@@ -774,6 +784,33 @@
   user-select: text;
 }
 
+/* What Reveille needs on disk, stated before the player goes looking for it. This is the first
+   thing read on a cold start with no install, so it carries body weight rather than note weight. */
+.setup__needs {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--brass);
+  border-radius: var(--radius);
+  background: var(--void);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.setup__needs .data {
+  color: var(--brass);
+}
+
+/* The lexicon sits last in setup's own chrome, as it does last in the shell's titlebar, so the
+   help control keeps one relative position across both views (WCAG 2.2 SC 3.2.6). */
+.setup__foot {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-2);
+}
+
 .setup__row {
   display: flex;
   gap: var(--space-2);
@@ -916,7 +953,12 @@
    The fixed columns are dropped in order of what a player choosing a server can
    do without, widest breakpoint first: Runs, then Mode, then Ping. The name is
    what is being protected — two servers you cannot tell apart cost more than any
-   of the three. */
+   of the three.
+
+   These moved out to 1360/1200/1080 for one day on 27 Aug 2026 to make room for a
+   **Needs** column. Both are reverted: Mode is what a player narrows the list by
+   before anything else, and it does not give up width to a price the detail pane
+   already states. */
 @media (max-width: 1200px) {
   .servers .col-runs {
     display: none;
@@ -924,10 +966,6 @@
 }
 
 @media (max-width: 1080px) {
-  :root {
-    --detail-width: 330px;
-  }
-
   .servers .col-mode {
     display: none;
   }
@@ -937,6 +975,10 @@
    tell two servers apart, and a name you cannot read costs more than a distance
    you can estimate from the list you already sorted. */
 @media (max-width: 960px) {
+  :root {
+    --detail-width: 330px;
+  }
+
   .servers .col-ping {
     display: none;
   }
@@ -971,10 +1013,16 @@
   margin-bottom: var(--space-1);
 }
 
-.indent {
-  padding-left: 20px;
-}
-
 .failed {
   color: var(--bad-text);
+}
+
+/* The sentence that turns the verdict above it into a decision.
+   Ranked above the `.quiet` caveats that follow it on purpose: readers take in roughly a fifth of
+   the words on screen, so the one line that must land carries more weight than the ones that
+   merely qualify it (docs/ux-standards.md §3.4). */
+.verdict-note {
+  color: var(--dim);
+  font-size: var(--text-sm);
+  line-height: 1.5;
 }

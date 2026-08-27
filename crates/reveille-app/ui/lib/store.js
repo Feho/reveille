@@ -87,8 +87,19 @@ export const state = {
   joinResult: null,
   joinError: null,
 
-  /** View state. */
-  filters: { query: "", hasPeople: false },
+  /**
+   * View state.
+   *
+   * `notEmpty` was called `hasPeople` until 27 Aug 2026. A client count is occupied slots and
+   * cannot distinguish a person from a bot or a parked connection, so the old name asserted in the
+   * toolbar exactly what the status bar four inches away says is not verified (rule H1,
+   * docs/design-review.md F7). The identifier moved with the label, because a name that reads as a
+   * claim is how the claim gets back onto the screen.
+   *
+   * `maxPing` gates on the one round trip this sweep measured, not on the in-game ping — see
+   * `roundTrip` in lib/format.js. Null means no gate.
+   */
+  filters: { query: "", notEmpty: false, maxPing: null },
   sort: { column: "clients", direction: "desc" },
   /** Which population the table lists: every answering server, the starred ones, or the launched ones. */
   scope: "all",
@@ -118,6 +129,19 @@ export const state = {
   checkedAt: new Map(),
   /** Sweep completion the favourites auto-check has already run for, so it runs once. */
   autoCheckedAt: null,
+
+  /**
+   * When the rows on screen were measured, once a sweep has failed on top of them.
+   *
+   * A sweep that cannot reach the master used to blank the table and leave the centre of the
+   * window reading "Nothing has been checked yet" underneath an error in the corner — the two
+   * contradicting each other, with no next action in either (docs/design-review.md F6). The rows
+   * from the last sweep that did work are kept instead, and this is the clock time that says what
+   * they are: a past reading, not a current one (docs/ux-standards.md §4.5).
+   *
+   * Null whenever the list on screen is this session's own answer.
+   */
+  staleAt: null,
 };
 
 const subscribers = new Set();
@@ -244,7 +268,8 @@ export function saveFilters() {
     localStorage.setItem(
       FILTERS_KEY,
       JSON.stringify({
-        ...state.filters,
+        notEmpty: state.filters.notEmpty,
+        maxPing: state.filters.maxPing,
         sort: state.sort,
         scope: state.scope,
         showAbsent: state.showAbsent,
@@ -260,7 +285,13 @@ export function loadFilters() {
   try {
     const saved = JSON.parse(localStorage.getItem(FILTERS_KEY) ?? "null");
     if (!saved) return;
-    state.filters = { query: "", hasPeople: !!saved.hasPeople };
+    // `hasPeople` is the pre-rename key. Read once so an existing player's toggle survives the
+    // rename; nothing writes it any more.
+    state.filters = {
+      query: "",
+      notEmpty: !!(saved.notEmpty ?? saved.hasPeople),
+      maxPing: PING_LIMITS.includes(saved.maxPing) ? saved.maxPing : null,
+    };
     if (saved.sort?.column) state.sort = saved.sort;
     if (SCOPES.includes(saved.scope)) state.scope = saved.scope;
     state.showAbsent = !!saved.showAbsent;
@@ -288,12 +319,43 @@ const SORTERS = {
   launched: (row, launches) => launches.get(row.address)?.lastLaunchedAt ?? "",
 };
 
-/** Whether a live row survives the search box and the toolbar toggle. */
+/**
+ * The round-trip ceilings the toolbar offers. Null is the default: no gate.
+ *
+ * A sort is not a filter. Sorting by players surfaces full servers on the other side of the
+ * world; sorting by ping surfaces empty ones next door. Shipping the sort without the filter is a
+ * documented failure across several modern browsers, and Doomseeker has had this since the 2000s
+ * (docs/ux-standards.md §7, docs/design-review.md F15).
+ */
+export const PING_LIMITS = [null, 80, 150, 250];
+
+/**
+ * Whether a live row survives the search box and the toolbar filters.
+ *
+ * The query matches the **address** as well as the name. It matched only the name here while
+ * `partitionScope` below matched both, so pasting an IP into All said "Nothing matches" with the
+ * server on screen, and the same paste in Favourites found it (docs/design-review.md F13).
+ */
 function matchesFilters(row) {
   const query = state.filters.query.trim().toLowerCase();
-  if (query && !row.server.hostname.toLowerCase().includes(query)) return false;
-  if (state.filters.hasPeople && (row.server.occupancy?.clients_reported ?? 0) < 1) return false;
+  if (query) {
+    const name = row.server.hostname.toLowerCase();
+    if (!name.includes(query) && !row.address.includes(query)) return false;
+  }
+  if (state.filters.notEmpty && (row.server.occupancy?.clients_reported ?? 0) < 1) return false;
+  const limit = state.filters.maxPing;
+  // A server that published no round trip is not gated by a ceiling it cannot be measured
+  // against: hiding it would be a claim about a figure that does not exist.
+  const trip = row.server.status_round_trip;
+  if (limit !== null && trip !== null && trip !== undefined && Number(trip) > limit) return false;
   return true;
+}
+
+/** Whether any filter is narrowing the list right now. */
+export function filtering() {
+  return Boolean(
+    state.filters.query.trim() || state.filters.notEmpty || state.filters.maxPing !== null,
+  );
 }
 
 /** The rows the table should show, after search, filters and sort. */

@@ -4,8 +4,12 @@
 // this module is the only place that calls commands and mutates state in
 // response to them.
 
-import { $, fill } from "./lib/dom.js";
+import { $ } from "./lib/dom.js";
+import { closeDialog, openDialog } from "./lib/dialog.js";
+import { openGlossary } from "./lib/glossary.js";
+import { closeMenu, menuIsOpen } from "./lib/menu.js";
 import {
+  browseFailure,
   browseServers,
   cancelBrowse,
   checkServer,
@@ -39,7 +43,6 @@ import { joinView, shoppingTotals } from "./views/join.js";
 
 const shell = $("#shell");
 const setupRoot = $("#setup-root");
-const infoDialog = $("#info-dialog");
 
 loadFilters();
 state.rememberedInstall = recallInstall();
@@ -61,7 +64,8 @@ $("#status-slot").replaceWith(servers.statusbar);
 document.body.append(servers.live);
 
 $("#install-chip").addEventListener("click", leaveServers);
-$("#info-dialog-close").addEventListener("click", () => infoDialog.close());
+$("#glossary-btn").addEventListener("click", openGlossary);
+$("#info-dialog-close").addEventListener("click", closeDialog);
 
 subscribe(render);
 
@@ -148,6 +152,13 @@ async function refresh() {
   // Any check still in flight is about the list this sweep is replacing.
   checkGeneration += 1;
   const swept = session();
+  // What is on screen now, kept only so a sweep that fails outright has something honest to fall
+  // back to. Blanking the table on a failed sweep left the centre of the window reading "Nothing
+  // has been checked yet" under an error about the check that had just run (docs/design-review.md
+  // F6). Only a list swept for *this* session qualifies: rows from another game or another folder
+  // are not a stale answer to this question, they are an answer to a different one.
+  const previous = listIsForCurrentSession() ? state.servers : [];
+  const previousAt = state.browse.completedAt;
   update((next) => {
     // Recorded before the first row arrives, because the streamed rows belong to this session
     // too, and a sweep that ends in an error still has to leave behind what it was asking.
@@ -174,6 +185,7 @@ async function refresh() {
     next.checks = new Map();
     next.checkedAt = new Map();
     next.autoCheckedAt = null;
+    next.staleAt = null;
   });
 
   try {
@@ -189,7 +201,14 @@ async function refresh() {
   } catch (error) {
     update((next) => {
       next.browse.running = false;
-      next.browse.error = errorText(error);
+      next.browse.error = browseFailure(error);
+      // Rows that streamed in before the failure are this sweep's own and stand on their own.
+      // Only a sweep that produced nothing falls back, and what it falls back to is marked.
+      if (!next.servers.length && previous.length) {
+        next.servers = previous;
+        next.staleAt = previousAt;
+        next.browse.completedAt = previousAt;
+      }
     });
   }
 }
@@ -218,9 +237,25 @@ onBrowseProgress((progress) => {
 /* Selecting and previewing -------------------------------------------------- */
 
 let previewToken = 0;
+let previewTimer = null;
 
-async function select(address) {
+/**
+ * How long a selection has to hold still before its catalogue lookup is sent.
+ *
+ * Selection follows focus in the grid, which is what makes the arrow keys useful — but it also
+ * means holding Down through twenty rows used to fire twenty `preview_join` calls at moh-db, one
+ * per row passed over (docs/design-review.md F4). The pane still updates on every step; only the
+ * third-party request waits. Long enough that scrolling costs nothing, short enough that a
+ * deliberate selection does not feel delayed.
+ */
+const PREVIEW_SETTLE_MS = 220;
+
+function select(address) {
   const token = ++previewToken;
+  if (previewTimer !== null) {
+    clearTimeout(previewTimer);
+    previewTimer = null;
+  }
   update((next) => {
     next.selected = address;
     next.preview = null;
@@ -233,10 +268,21 @@ async function select(address) {
   });
 
   const row = selectedRow();
-  // Nothing to resolve: the rotation is already satisfied, or there is none.
+  // Nothing to resolve: the map list is already satisfied, or there is none.
   if (!row || row.compatibility.state.state === "compatible") return;
 
+  // The meter goes up immediately even though the request has not been sent. It is honest about
+  // what it says — this server's sources are being worked out — and a control that looked idle for
+  // a fifth of a second and then started would read as a stutter.
   update((next) => (next.previewProgress = { index: -1, of: 0, map: "" }));
+  previewTimer = setTimeout(() => {
+    previewTimer = null;
+    void resolvePreview(address, token);
+  }, PREVIEW_SETTLE_MS);
+}
+
+async function resolvePreview(address, token) {
+  if (token !== previewToken) return;
   try {
     const preview = await previewJoin(session(), address);
     if (token !== previewToken) return;
@@ -511,12 +557,63 @@ subscribe(autoCheckFavourites);
 /* Dialogs and global keys ---------------------------------------------------- */
 
 function showNonResults() {
-  fill($("#info-dialog-body"), ...nonResultsBreakdown());
-  infoDialog.showModal();
+  openDialog("Registered but not listed", ...nonResultsBreakdown());
 }
+
+/**
+ * The three regions F6 cycles between, in the order the window reads.
+ *
+ * F6 is the Windows convention for moving between the panes of one window, and without it a
+ * keyboard player crossing from the list to the detail pane has to arrow through the list to its
+ * end first (docs/design-review.md F22).
+ */
+const REGIONS = [
+  { root: () => document.querySelector(".toolbar"), enter: () => servers.focusSearch() },
+  { root: () => document.querySelector(".list-pane"), enter: () => servers.focusFirstRow() },
+  {
+    root: () => $("#detail-slot"),
+    enter: () => $("#detail-slot")?.querySelector("button, input, select, a[href]")?.focus(),
+  },
+];
+
+function cycleRegion(backwards) {
+  const active = document.activeElement;
+  const at = REGIONS.findIndex((region) => region.root()?.contains(active));
+  const step = backwards ? -1 : 1;
+  // Start from the list when focus is somewhere with no region of its own — the titlebar, or the
+  // body after a repaint — rather than refusing to move at all.
+  const from = at === -1 ? (backwards ? 0 : REGIONS.length - 1) : at;
+  const wrap = (index) => ((index % REGIONS.length) + REGIONS.length) % REGIONS.length;
+  for (let hop = 1; hop <= REGIONS.length; hop += 1) {
+    const region = REGIONS[wrap(from + step * hop)];
+    const before = document.activeElement;
+    region.enter();
+    if (document.activeElement !== before) return;
+  }
+}
+
+/**
+ * WebView2's own context menu never reaches a row, a button or a heading.
+ *
+ * Back, Reload and Inspect on a right-click is the loudest tell that a desktop window is a web
+ * page in a costume (docs/ux-standards.md §7.3). It is left alone over anything the player can
+ * select text in, because there the browser menu is genuinely the right one — Copy is what a
+ * right-click on an address is for.
+ */
+document.addEventListener("contextmenu", (event) => {
+  if (event.defaultPrevented) return;
+  const target = event.target;
+  const editable =
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target?.isContentEditable === true ||
+    Boolean(target?.closest?.(".selectable, .data, .server-address"));
+  if (!editable) event.preventDefault();
+});
 
 document.addEventListener("keydown", (event) => {
   if (!state.install) return;
+  if (menuIsOpen() && event.key !== "Escape") return;
   // A bare letter is only a shortcut where there is nothing else for it to mean. Inside any form
   // control it is input — the search box, but also the game select, where R jumps to an option —
   // and inside an open dialog the shortcuts behind it are not reachable anyway. Alt and Meta are
@@ -528,9 +625,19 @@ document.addEventListener("keydown", (event) => {
     event.target.isContentEditable === true ||
     Boolean(event.target.closest?.("dialog[open]"));
   const plain = !event.ctrlKey && !event.altKey && !event.metaKey;
-  if (event.key === "/" && !typing) {
+  if (event.key === "F6") {
+    event.preventDefault();
+    cycleRegion(event.shiftKey);
+  } else if (event.ctrlKey && (event.key === "f" || event.key === "F")) {
+    // Ctrl+F is what every Windows application binds for "find in this thing". `/` stays, for the
+    // players who learned it here.
     event.preventDefault();
     servers.focusSearch();
+  } else if (event.key === "/" && !typing) {
+    event.preventDefault();
+    servers.focusSearch();
+  } else if (event.key === "Escape" && menuIsOpen()) {
+    closeMenu();
   } else if (event.key === "Escape" && typing) {
     update((next) => (next.filters.query = ""));
     servers.focusFirstRow();

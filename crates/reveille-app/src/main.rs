@@ -16,12 +16,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use reveille_core::content::{
-    self, CatalogueCandidate, CatalogueResolutionPass, DownloadProgress, ResolutionOutcome,
-    WantedMap,
+    self, CatalogueCandidate, CatalogueNonResultReason, CatalogueResolutionPass, DownloadProgress,
+    ResolutionOutcome, WantedMap,
 };
 use reveille_core::discovery::{
-    self, BrowseConfig, BrowseEvent, BrowseSummary, MasterEndpoint, NonResult, NonResultReason,
-    ProbeStage, QueryPort, Server, TargetGame,
+    self, BrowseConfig, BrowseEvent, BrowseSummary, DiscoveryError, MasterEndpoint, NonResult,
+    NonResultReason, ProbeStage, QueryPort, RequestError, Server, TargetGame,
 };
 use reveille_core::engine::EngineChoice;
 use reveille_core::install::{self, Installation};
@@ -418,6 +418,89 @@ impl OpenMohaaFailure {
         Self {
             kind: OpenMohaaFailureKind::NoAssetForHost,
             detail: detail.to_string(),
+        }
+    }
+}
+
+/// Why the server list could not be built, classified once here rather than by matching message
+/// text in JavaScript.
+///
+/// The same argument as [`OpenMohaaFailureKind`], applied to the other command that talks to the
+/// network. A local routing or socket-permission failure, a community master that refuses or
+/// resets its TCP connection, and a master whose reply is truncated are different observations,
+/// and all three used to reach the status bar as one raw
+/// `error.to_string()` -- "master reply body has 42 bytes; expected a multiple of 6" -- with no
+/// cause and no next action (docs/design-review.md F6).
+///
+/// `detail` carries the original message for diagnosis. The shell chooses its wording from `kind`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum BrowseFailureKind {
+    /// The local socket could not use the network: no route, no usable address, or no permission.
+    /// The master exchange is TCP; per-server UDP failures are recorded separately.
+    NoNetwork,
+    /// The master timed out, refused the TCP connection, or reset an established exchange.
+    MasterUnreachable,
+    /// The master answered and the answer could not be read: a truncated body, a missing
+    /// terminator, a challenge of the wrong length.
+    MasterUnreadable,
+    /// A failure outside the master exchange, carried through with its own message rather than
+    /// dressed up as one of the causes above.
+    Internal,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BrowseFailure {
+    kind: BrowseFailureKind,
+    detail: String,
+}
+
+/// Separate I/O failures that establish a local networking problem from failures that can be the
+/// remote master's doing. `RequestError::Network` is shared by TCP connect/read/write and the
+/// per-server UDP path, so treating the whole variant as "this PC is offline" invents a cause.
+fn classify_master_network_error(error: &io::Error) -> BrowseFailureKind {
+    use io::ErrorKind;
+
+    match error.kind() {
+        ErrorKind::PermissionDenied
+        | ErrorKind::AddrNotAvailable
+        | ErrorKind::NetworkUnreachable
+        | ErrorKind::HostUnreachable => BrowseFailureKind::NoNetwork,
+        _ => BrowseFailureKind::MasterUnreachable,
+    }
+}
+
+impl From<DiscoveryError> for BrowseFailure {
+    fn from(error: DiscoveryError) -> Self {
+        use BrowseFailureKind as Kind;
+
+        let kind = match &error {
+            DiscoveryError::Master { source, .. } => match source {
+                RequestError::Network(source) => classify_master_network_error(source),
+                RequestError::Timeout => Kind::MasterUnreachable,
+                RequestError::Parse(_)
+                | RequestError::EmptyMasterGreeting
+                | RequestError::MasterResponseTooLarge => Kind::MasterUnreadable,
+                // Encoding the validation cannot fail on any input this crate supplies, so a
+                // failure here is a bug in Reveille and not a fact about the network.
+                RequestError::Crypto(_) => Kind::Internal,
+            },
+            DiscoveryError::Task(_) => Kind::Internal,
+        };
+        Self {
+            kind,
+            detail: error.to_string(),
+        }
+    }
+}
+
+/// Every other way `browse_servers` can stop: a folder that will not read, a poisoned lock. These
+/// carry their own message and are not classified as anything about the network.
+impl From<String> for BrowseFailure {
+    fn from(detail: String) -> Self {
+        Self {
+            kind: BrowseFailureKind::Internal,
+            detail,
         }
     }
 }
@@ -872,7 +955,7 @@ async fn browse_servers(
     session: Session,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-) -> Result<BrowserPayload, String> {
+) -> Result<BrowserPayload, BrowseFailure> {
     let (_, index) = installed_maps(&session)?;
 
     // A stop pressed just as the previous sweep ended leaves a permit behind, which would cancel
@@ -905,8 +988,8 @@ async fn browse_servers(
 
     let report = sweep
         .await
-        .map_err(|error| format!("the server sweep did not finish: {error}"))?
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| BrowseFailure::from(format!("the server sweep did not finish: {error}")))?
+        .map_err(BrowseFailure::from)?;
     let servers = report
         .outcomes
         .iter()
@@ -1018,7 +1101,7 @@ async fn check_server(
 ) -> Result<CheckResult, String> {
     let address = address
         .parse::<SocketAddrV4>()
-        .map_err(|error| format!("invalid server address: {error}"))?;
+        .map_err(|error| format!("Reveille could not read the address {address}: {error}"))?;
     let (_, index) = installed_maps(&session)?;
     let endpoint = MasterEndpoint {
         address: *address.ip(),
@@ -1388,9 +1471,30 @@ async fn install_shopping_list(
     }
     failures.extend(catalogue.non_results.iter().map(|result| InstallFailure {
         map: result.wanted.name.clone(),
-        reason: format!("the catalogue lookup did not complete: {:?}", result.reason),
+        reason: catalogue_reason(&result.reason),
     }));
     Ok((installed, failures))
+}
+
+/// Why one catalogue lookup produced nothing, in a sentence a player can read.
+///
+/// This rendered with `{:?}` until 27 Aug 2026, which put `HttpStatus { status: 503 }` in the
+/// detail pane of a launcher aimed at people who have never seen a Rust enum
+/// (docs/design-review.md F6). The wording lives here rather than in `reveille-core` because how
+/// a non-result is presented is policy, and the core stays free of it (AGENTS.md).
+fn catalogue_reason(reason: &CatalogueNonResultReason) -> String {
+    match reason {
+        CatalogueNonResultReason::Timeout => "the map catalogue did not answer in time".to_owned(),
+        CatalogueNonResultReason::HttpStatus { status } => {
+            format!("the map catalogue refused the request (HTTP {status})")
+        }
+        CatalogueNonResultReason::Network { message } => {
+            format!("the map catalogue could not be reached: {message}")
+        }
+        CatalogueNonResultReason::Malformed { message } => {
+            format!("the map catalogue sent a reply Reveille could not read: {message}")
+        }
+    }
 }
 
 /// Start the client the detected install actually provides, connected to `address`.
@@ -1479,7 +1583,7 @@ fn preview_cache_matches(
 fn find_server(state: &tauri::State<'_, AppState>, address: &str) -> Result<Server, String> {
     let address = address
         .parse::<SocketAddrV4>()
-        .map_err(|error| format!("invalid server address: {error}"))?;
+        .map_err(|error| format!("Reveille could not read the address {address}: {error}"))?;
     state
         .servers
         .lock()
@@ -1662,9 +1766,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::path::Path;
 
     use reveille_core::bsp::Checksum;
+    use reveille_core::discovery::ParseError;
     use reveille_core::install::{IdentificationMethod, Product};
     use reveille_core::join::{
         CompatibilityAssessment, CompatibilityState, CurrentMapReadiness, MapsNeeded,
@@ -1677,11 +1783,12 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        AppState, EngineChoice, MasterEndpoint, OpenMohaaFailure, OpenMohaaFailureKind,
-        OpenMohaaInstalledBuild, QueryPort, Server, Session, TargetGame, answered_for_another_game,
-        cache_openmohaa_offer, cached_openmohaa_offer, installed_maps, installed_openmohaa_build,
-        launch_refusal, merge_checked_server, openmohaa_client_path, preview_cache_matches,
-        record_openmohaa_install,
+        AppState, BrowseFailure, BrowseFailureKind, CatalogueNonResultReason, DiscoveryError,
+        EngineChoice, MasterEndpoint, OpenMohaaFailure, OpenMohaaFailureKind,
+        OpenMohaaInstalledBuild, QueryPort, RequestError, Server, Session, TargetGame,
+        answered_for_another_game, cache_openmohaa_offer, cached_openmohaa_offer, catalogue_reason,
+        installed_maps, installed_openmohaa_build, launch_refusal, merge_checked_server,
+        openmohaa_client_path, preview_cache_matches, record_openmohaa_install,
     };
 
     fn assessment(
@@ -2258,5 +2365,153 @@ mod tests {
 
         assert!(launch_refusal(&cant_tell, false).is_some());
         assert_eq!(launch_refusal(&cant_tell, true), None);
+    }
+
+    #[test]
+    fn a_sweep_failure_says_which_of_the_four_things_went_wrong() {
+        // The whole point of classifying here rather than in JavaScript: a local networking
+        // failure, a master that is down, and a master whose reply was truncated are different
+        // situations, and matching on message text is how they became one unreadable line in the
+        // status bar.
+        let unreadable = BrowseFailure::from(DiscoveryError::Master {
+            target: TargetGame::AlliedAssault,
+            source: RequestError::Parse(ParseError::MisalignedMasterBody { length: 42 }),
+        });
+        assert_eq!(unreadable.kind, BrowseFailureKind::MasterUnreadable);
+
+        let silent = BrowseFailure::from(DiscoveryError::Master {
+            target: TargetGame::AlliedAssault,
+            source: RequestError::Timeout,
+        });
+        assert_eq!(silent.kind, BrowseFailureKind::MasterUnreachable);
+
+        let offline = BrowseFailure::from(DiscoveryError::Master {
+            target: TargetGame::AlliedAssault,
+            source: RequestError::Network(io::Error::from(io::ErrorKind::PermissionDenied)),
+        });
+        assert_eq!(offline.kind, BrowseFailureKind::NoNetwork);
+
+        // Refusal and reset are observations about the remote TCP exchange, not evidence that the
+        // player's PC is offline. Both used to be folded into `NoNetwork` with every other I/O
+        // error because `fetch_master` wraps connect, read, and write failures in one variant.
+        let master_io_failure = |kind| {
+            BrowseFailure::from(DiscoveryError::Master {
+                target: TargetGame::AlliedAssault,
+                source: RequestError::Network(io::Error::from(kind)),
+            })
+            .kind
+        };
+        assert_eq!(
+            master_io_failure(io::ErrorKind::ConnectionRefused),
+            BrowseFailureKind::MasterUnreachable
+        );
+        assert_eq!(
+            master_io_failure(io::ErrorKind::ConnectionReset),
+            BrowseFailureKind::MasterUnreachable
+        );
+
+        // Whatever the classification, the original message survives for a bug report. It is
+        // simply no longer the only thing the player is given.
+        assert!(unreadable.detail.contains("42"));
+    }
+
+    #[test]
+    fn a_catalogue_non_result_reads_as_a_sentence() {
+        // It rendered as `HttpStatus { status: 503 }` in the detail pane until 27 Aug 2026.
+        let refused = catalogue_reason(&CatalogueNonResultReason::HttpStatus { status: 503 });
+
+        assert!(refused.contains("503"));
+        assert!(!refused.contains('{'));
+        assert!(
+            !catalogue_reason(&CatalogueNonResultReason::Timeout).contains("Timeout"),
+            "a player-facing reason must not carry the variant name"
+        );
+    }
+
+    #[test]
+    fn the_server_table_is_one_tab_stop() {
+        // Every row used to carry `tabIndex: 0`, which put the Join button roughly 260 Tab presses
+        // from the search box and made the arrow keys the table was designed around redundant. A
+        // grid is a composite widget: exactly one row is tabbable and everything else is reached
+        // with the arrows. A regression here is invisible to anyone using a mouse.
+        let servers = include_str!("../ui/views/servers.js");
+
+        assert!(
+            servers.contains("tr.tabIndex = tr === tabbable ? 0 : -1;"),
+            "ui/views/servers.js: exactly one row may hold the grid's tab stop"
+        );
+        assert!(
+            servers.contains("const tabbable = selected ?? rows[0] ?? gridRows[0] ?? null;"),
+            "ui/views/servers.js: an absent-only saved scope must still expose a grid tab stop"
+        );
+        assert!(
+            servers.contains("control.tabIndex = -1;"),
+            "ui/views/servers.js: controls inside a row must not be tab stops of their own"
+        );
+        assert!(
+            servers.contains(r#"{ className: "servers", role: "grid", "aria-label": "Servers" }"#),
+            "ui/views/servers.js: aria-selected on a row needs the grid role to mean anything"
+        );
+    }
+
+    #[test]
+    fn a_failed_sweep_keeps_the_rows_it_could_not_replace() {
+        // Blanking the table on a failed sweep left the centre of the window reading "Nothing has
+        // been checked yet" under an error about the check that had just run. The rows are kept
+        // and marked instead — and only when they were swept for the session still in force, or
+        // they would be another game's servers under this game's heading.
+        let app = include_str!("../ui/app.js");
+
+        assert!(
+            app.contains("const previous = listIsForCurrentSession() ? state.servers : [];"),
+            "ui/app.js: only a list swept for this session may be kept as a stale reading"
+        );
+        assert!(
+            app.contains("next.staleAt = previousAt;"),
+            "ui/app.js: kept rows must carry the time they were actually measured"
+        );
+    }
+
+    #[test]
+    fn sweep_progress_is_announced_at_milestones_rather_than_per_probe() {
+        // A sweep emits one event per probed endpoint. A live region that restated "N of M done"
+        // on each one sent a screen reader roughly two hundred announcements per sweep.
+        let servers = include_str!("../ui/views/servers.js");
+
+        assert!(
+            servers.contains("const quarter = Math.min(3, Math.floor((probed / inspected) * 4));"),
+            "ui/views/servers.js: sweep progress must be coarsened before it is announced"
+        );
+        assert!(
+            !servers.contains("${state.browse.probed} of ${state.browse.inspected}"),
+            "ui/views/servers.js: a running count inside the announcement defeats the milestone"
+        );
+    }
+
+    #[test]
+    fn a_ready_server_adds_nothing_to_the_detail_pane() {
+        // docs/ui.md §9: a ready server says nothing — silence is the correct rendering of
+        // "nothing to do". `needsSection` returns null when there is no explanation to give, no
+        // cost, no choice pending and no caveat true of this server, which is the ordinary case
+        // and the one a player is trying to pick out of the list.
+        let join = include_str!("../ui/views/join.js");
+        assert!(
+            join.contains(
+                "if (!resolving && !explanation && !costly && !choices.length && !notes && !state.previewError) {"
+            ),
+            "ui/views/join.js: needsSection must render nothing for a server with nothing to say"
+        );
+        // The published rotation is not listed at all. A map already on disk needs no row, and a
+        // missing map that resolves is a number in the button rather than a list to read.
+        for gone in [
+            "function rotationSection(",
+            "On disk — nothing to do",
+            "Missing locally",
+        ] {
+            assert!(
+                !join.contains(gone),
+                "ui/views/join.js: the map rotation listing must not come back ({gone})"
+            );
+        }
     }
 }

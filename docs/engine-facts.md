@@ -340,9 +340,13 @@ the part that belongs here.
   (`sv_client.c:389-640`). Actually predicting a rejection needs a real Huffman-compressed
   `connect`, which on success creates a live `CS_CONNECTED` client on someone else's server.
   That is a join, not a probe. Preflight uses `getstatus` only.
-- (H1) **Never label a client count "players" or "humans."** `numplayers` is `SV_NumClients()` —
-  every non-free slot, with no way to distinguish a person from a bot or a parked connection.
-  The type should be named to make the mistake hard.
+- (H1) **Never label a client count "humans."** `numplayers` is `SV_NumClients()` — every non-free
+  slot. *Corrected 27 Aug 2026: this said "players" or "humans", on the grounds that a bot cannot be
+  told from a person in the figure. Bots are not in `svs.clients` — measured live on all 11 bot
+  servers (`plan.md`, milestone 2), which is what H2 disjointness rests on — so `Players` is
+  allowed and `humans` is not. What remains true is that a slot counts from `connect`, so it counts
+  a player still downloading or sitting at a menu.* The type should still be named for the wire
+  field, not for the label.
 - (H4) **Never report a moh-db download as verified.** No hash is published; the digest is *recorded*.
 - (H3) **Never emit a boolean "can I join".** The states are `Compatible` / `NeedsMaps(n)` /
   `NoSource` / `CantTell`, and `Compatible` means *nothing checkable is wrong*.

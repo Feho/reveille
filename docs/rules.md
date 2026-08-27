@@ -23,11 +23,32 @@ point of this file — it is the difference between a principle and a guarantee.
 
 ## H — Honesty: what Reveille may claim
 
-### H1 · Never call a client count "players" or "humans"
-**Because** `numplayers` is `SV_NumClients()` — every non-free slot, with no way to distinguish a
-person from a bot or a parked connection (`engine-facts.md` §5).
-**Enforced at** `discovery/model.rs` `ReportedOccupancy`; the type is named to make the mistake
-hard. Test: `discovery/client.rs::does_not_infer_bots_from_retail_minplayers`.
+### H1 · Never call a client count "humans", and never fold bots into it
+**Amended 27 Aug 2026.** The rule read *never call a client count "players" or "humans"*, on the
+grounds that `numplayers` gives "no way to distinguish a person from a bot or a parked connection"
+(`engine-facts.md` §5). Half of that turned out to be wrong, and the project's own measurement is
+what shows it: bots are **not** in `svs.clients`, verified live on all 11 bot servers found in the
+20 Aug sweep (`plan.md`, milestone 2) — which is exactly why H2 exists to keep them disjoint. A
+figure that provably excludes bots is not one that may not be called `Players`; forbidding the word
+was over-correction, and it cost every newcomer the one column heading they already understood from
+every other server browser they have used.
+
+What survives is the half that is still true. A slot is occupied from `connect` onwards, so it
+counts while its holder is downloading or sitting at a menu, and it counts a stale connection the
+server has not yet timed out. So the figure is a count of **connections the server counts as
+players**, not of people at play, and the two claims Reveille still may not make are:
+
+- **"humans"**, or any wording that promises a person at a keyboard;
+- **any sum of clients and bots**, which is H2 and is unchanged.
+
+**Because** the qualifier belongs where a reader can reach it, not in the heading: a column heading
+that hedges its own noun is read as a warning about the *number*, when what is uncertain is the
+*word*. So the heading is one word and the glossary carries the sentence.
+**Enforced at** `discovery/model.rs` `ReportedOccupancy` keeps the two quantities separate and is
+named for the wire field, not for the label; `ui/lib/glossary.js` defines **Players** and **Bots**
+in reachable text; the status bar's tooltip states the connecting-and-downloading case.
+Test: `discovery/client.rs::does_not_infer_bots_from_retail_minplayers`.
+*The label itself has no mechanical guard — `copy-review` is the check.*
 
 ### H2 · Bots are a separate, disjoint quantity and are never summed into the client figure
 **Because** Bots are not in `svs.clients`, so adding them double-counts. Verified live on all 11
@@ -121,7 +142,7 @@ ping gate (S1), and no reply ever tells Reveille the answer.
 **Enforced at** `ui/lib/bookmarks.js` stores an address, a query port and a name and **nothing
 else**, so there is no measurement to render as current; a remembered server the current check did
 not return is drawn by `absentRow` in `ui/views/servers.js` with its name in the *remembered* style
-and the words "not in this check" across every column a figure would have been in, never "offline"
+and the words "not in this list" across every column a figure would have been in, never "offline"
 and never with figures. The row also carried an explicit "remembered name" line for a while; it was
 dropped as redundant, and the rule holds without it because the row says outright that this check
 did not return the server, and the name is the only remembered thing left on it. History is written only
@@ -208,7 +229,7 @@ removed (`ui.md` §2.1) — the player cannot judge a control whose result is of
 address (H12), and the game it was saved under is a fact about a past moment; folding on a stored
 or re-stamped "last seen under Spearhead" would hide a server that has since moved games under the
 game it no longer runs. The criterion is the one the rows themselves already state and that this
-check demonstrably established: **it was not in this check**.
+check demonstrably established: **it was not in this list**.
 **Enforced at** `ui/lib/store.js` `scopedRows` emits the `disclosure` item whenever the absent set
 is non-empty — open or shut, so the count is on screen either way — and only then omits the rows
 behind it. `ui/views/servers.js` `disclosureRow` draws it with `aria-expanded`, in the row where
@@ -335,7 +356,7 @@ that is worth knowing before trusting this list as a safety net.
 H12 is **partly** guarded, and the split matters. Two of its clauses have a text check each — the
 list swept for another session, and the row a later check found gone. Its storage half needs none:
 `bookmarks.js` never persists a measurement, so the stale figure a reviewer would look for does not
-exist to be rendered. What is unguarded is the wording — "not in this check" versus "offline",
+exist to be rendered. What is unguarded is the wording — "not in this list" versus "offline",
 "Launched" versus "Joined" — and `copy-review` is the check for that. Both text checks guard the
 exact regression that shipped, not the behaviour in general: neither would catch the same rule
 broken in a new place.

@@ -133,7 +133,18 @@ export function mapName(value) {
   return name === "" ? "(unnamed)" : name;
 }
 
-/** The canonical four state names, used wherever the decision is actually made. */
+/**
+ * The canonical four state names.
+ *
+ * Every one of them is a measurement, not a mood word. A verbal hedge — "can't tell", "no
+ * source", "possibly compatible" — costs a reader trust in the figure and in the source, where
+ * the same fact stated as a measurement costs almost none (van der Bles et al., PNAS 2020;
+ * docs/ux-standards.md §1.1). So the name says what Reveille found, and the player is left to
+ * draw the verdict.
+ *
+ * "Map list", never "rotation" — the server publishes a list, and calling it a rotation claims an
+ * order that is the server's to change.
+ */
 export function stateName(state) {
   switch (state?.state) {
     case "compatible":
@@ -141,23 +152,34 @@ export function stateName(state) {
     case "needs_maps":
       return `Needs ${plural(state.count, "map")}`;
     case "no_source":
-      return "No source";
+      return `No download for ${plural(state.count, "map")}`;
     default:
-      return "Can't tell";
+      return "Map list not published";
   }
 }
 
-/** How each state was arrived at, in the vocabulary the protocol can support. */
+/**
+ * How each state was arrived at, rendered as persistent text beside the name.
+ *
+ * Not a tooltip. This is the sentence that turns a two-word noun into a decision, and a `title`
+ * is unreachable by keyboard and by touch and fails WCAG 2.2 SC 1.4.13 outright
+ * (docs/ux-standards.md §3.1).
+ *
+ * `Compatible` returns null on purpose. A ready server says nothing: silence is the correct
+ * rendering of "nothing to do" (docs/ui.md §9).
+ */
 export function stateExplanation(state) {
   switch (state?.state) {
     case "compatible":
-      return "Every map this server published, including the one it is running now, is on disk. The server still decides whether you get in.";
+      return null;
     case "needs_maps":
-      return "This server's rotation uses maps you do not have. Reveille can fetch them before you join.";
+      return "This server's map list includes maps you do not have. Reveille can download them before you join.";
     case "no_source":
-      return "At least one map in the rotation is not in any catalogue Reveille can reach.";
+      return state.count === 1
+        ? "This map is in no catalogue Reveille can reach. You can play until the map list reaches it, then you are dropped."
+        : "These maps are in no catalogue Reveille can reach. You can play until the map list reaches them, then you are dropped.";
     default:
-      return "This server published no map list. Only the map it is running now could be checked.";
+      return "This server published no map list. Reveille checked only the map it is running now.";
   }
 }
 
@@ -233,4 +255,39 @@ export function nonResultReason(group) {
     default:
       return `${group.reason} at ${what}`;
   }
+}
+
+/**
+ * Why the server list could not be built, in the player's terms.
+ *
+ * The `kind` is decided in Rust, beside the errors it names, exactly as `OpenMohaaFailureKind`
+ * already is — the shell never reads a cause out of a formatted message. Each one carries a cause
+ * and a remedy, because the two moments this fires are where a non-technical player decides
+ * whether the tool is broken or their PC is (docs/design-review.md F6).
+ *
+ * The original message is kept as `detail` and shown as detail, not as the whole status bar.
+ */
+const BROWSE_FAILURES = {
+  no_network: {
+    title: "Reveille could not reach the network",
+    remedy:
+      "Check that this PC is online. A firewall blocking the master server's TCP connection can cause this too.",
+  },
+  master_unreachable: {
+    title: "The master server could not be reached",
+    remedy: "It is run by the community and is sometimes down. Try again in a few minutes.",
+  },
+  master_unreadable: {
+    title: "The master server sent a reply Reveille could not read",
+    remedy: "Nothing on this PC caused it. Try again; the reply may have been cut short.",
+  },
+  internal: {
+    title: "The server list could not be built",
+    remedy: null,
+  },
+};
+
+export function browseFailureText(failure) {
+  const known = BROWSE_FAILURES[failure?.kind] ?? BROWSE_FAILURES.internal;
+  return { ...known, detail: failure?.detail ?? "" };
 }

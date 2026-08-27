@@ -3,9 +3,16 @@
 // The detail pane. Selecting a server previews the join in place, so the list
 // never disappears and servers stay comparable.
 //
-// This is where the four canonical state names live — Compatible, Needs N maps,
-// No source, Can't tell — because this is where the decision is made. The list
-// deliberately does not repeat them as badges.
+// This is where three of the four canonical state names are rendered — Needs N
+// maps, No download for N maps, Map list not published — because this is where
+// the decision is made. The list deliberately does not repeat them as badges.
+// Each name states what Reveille measured rather than how confident it feels
+// about it (lib/format.js `stateName`, docs/ux-standards.md §1.1).
+//
+// The fourth, Compatible, is rendered nowhere. A ready server has nothing to
+// qualify, and a heading reading `Compatible` above a button reading `Join`
+// restates the control beneath it. Silence is the correct rendering of "nothing
+// to do" (docs/ui.md §9).
 //
 // The join gate is about the map running *now*, not the whole rotation. A server
 // with one unobtainable map later in its rotation is perfectly playable until it
@@ -85,8 +92,7 @@ function body(row, onRecheck) {
     facts(server),
     result ? outcomeSection(result) : null,
     run ? installSection(run) : null,
-    !run && !result ? verdictSection(assessment, preview, server) : null,
-    !run && !result ? rotationSection(row, assessment, preview) : null,
+    !run && !result ? needsSection(assessment, preview, server) : null,
   );
 }
 
@@ -201,8 +207,8 @@ function checkedLine(address) {
   if (!swept) return el("p", { className: "quiet" }, "");
   return el(
     "p",
-    { className: "quiet", title: "The figures on this row come from that check, and not since." },
-    `From the check at ${swept}`,
+    { className: "quiet", title: "The figures on this row come from that list, and not since." },
+    `From the server list at ${swept}`,
   );
 }
 
@@ -266,18 +272,24 @@ function goneDetail(check, address) {
   return "This server did not answer.";
 }
 
+/**
+ * The facts about this server that the row above does not already carry.
+ *
+ * The published rotation's *size* used to sit here as a **Map list** row. It went with the
+ * rotation listing itself on 27 Aug 2026: how many maps a server intends to play later is not
+ * something a player decides on, and in the one case where it mattered — no list published at
+ * all — the state below says so in a sentence rather than leaving the reader to infer it from
+ * the words "not published" beside a heading.
+ */
 function facts(server) {
-  const rotation = server.rotation?.length ?? 0;
   return el(
     "div",
     { className: "detail__section" },
     el(
       "dl",
       { className: "kv" },
-      el("dt", null, "Now"),
+      el("dt", null, "Map"),
       el("dd", null, server.current_map ? mapName(server.current_map) : "not published"),
-      el("dt", null, "Rotation"),
-      el("dd", null, rotation ? plural(rotation, "map") : "not published"),
       server.reserved_slots
         ? el("dt", null, "Reserved")
         : null,
@@ -288,21 +300,53 @@ function facts(server) {
   );
 }
 
-function verdictSection(assessment, preview, server) {
+/**
+ * What this server needs — and nothing at all when it needs nothing.
+ *
+ * Until 27 Aug 2026 this was two sections. **Before you join** restated a verdict the primary
+ * button already carries in its own label, and **Maps** listed the whole published rotation,
+ * every map already on disk included, under headings that were mostly empty. A ready server —
+ * the ordinary case, and the one a player is trying to pick out of the list — drew two headings,
+ * a state name and a paragraph of maps it already has, and pushed the address and the freshness
+ * line below the fold to do it. docs/ui.md §9 had already ruled on this: *a ready server says
+ * nothing; silence is the correct rendering of "nothing to do"*, and an explanation earns a
+ * paragraph only if it changes the next click.
+ *
+ * So this returns `null` outright for a compatible server with nothing to qualify. What survives
+ * is what changes the click: the state and how it was reached, what it costs, and the one choice
+ * Reveille refuses to make on the player's behalf.
+ *
+ * The rotation is not drawn at all. A map already on disk needs no row; a missing map that
+ * resolves is a number in the button, not a list to read; and *which* maps have no download
+ * changes nothing the player can do about them, so the state name counts them and stops there.
+ * The single map that does block a join — the one running right now — is named by the action bar,
+ * which is where the block is.
+ */
+function needsSection(assessment, preview, server) {
   const resolving = state.previewProgress && !preview;
   const totals = preview ? shoppingTotals(preview) : null;
+  const explanation = stateExplanation(assessment.state);
+  const choices = (preview?.catalogue?.resolutions ?? []).filter(
+    (resolution) => resolution.outcome === "choice_required",
+  );
+  const notes = caveats(server, assessment.state?.state === "compatible");
+  const costly = Boolean(totals && totals.count > 0);
+
+  if (!resolving && !explanation && !costly && !choices.length && !notes && !state.previewError) {
+    return null;
+  }
 
   return el(
     "div",
     { className: "detail__section" },
-    el("p", { className: "label" }, "Join check"),
-    el(
-      "h3",
-      { className: "display heading-sm", title: stateExplanation(assessment.state) },
-      stateName(assessment.state),
-    ),
+    // The state name is drawn only when it qualifies something. "Compatible" over a button that
+    // already reads `Join` is a heading restating the control beneath it.
+    explanation ? el("h3", { className: "display heading-sm" }, stateName(assessment.state)) : null,
+    // Persistent, not a tooltip: this sentence is what makes the name above it a decision, and a
+    // title is unreachable by keyboard and by touch (docs/ux-standards.md §3.1).
+    explanation ? el("p", { className: "verdict-note" }, explanation) : null,
     resolving ? resolvingMeter() : null,
-    totals && totals.count > 0
+    costly
       ? el(
           "div",
           { className: "headline-number" },
@@ -315,7 +359,23 @@ function verdictSection(assessment, preview, server) {
         )
       : null,
     state.previewError ? el("p", { className: "error", role: "alert" }, state.previewError) : null,
-    caveats(server),
+    choices.length
+      ? el(
+          "div",
+          { className: "rot" },
+          el(
+            "p",
+            {
+              className: "label group-title",
+              title:
+                "The catalogue files these under a different name. Reveille never picks for you, and checks the archive contents after downloading.",
+            },
+            "Needs your choice",
+          ),
+          choices.map((resolution) => choiceBlock(resolution)),
+        )
+      : null,
+    notes,
   );
 }
 
@@ -339,132 +399,6 @@ function resolvingMeter() {
     ),
     el("p", { className: "quiet data" }, `looking up ${mapName(map)} · ${index + 1}/${of}`),
   );
-}
-
-/**
- * Group what this server needs the way a decision needs it, not the way the wire sent it.
- *
- * The preflight covers the published rotation *and* the map running now, which is why this is
- * headed "Maps" rather than "Rotation": a server can be running a map its own `sv_maplist` never
- * mentions, or publish no rotation at all while still telling you what it is running.
- */
-function rotationSection(row, assessment, preview) {
-  const maps = assessment.preflight?.maps ?? [];
-  const noRotation = (row.server.rotation?.length ?? 0) === 0;
-  if (!maps.length) {
-    return el(
-      "div",
-      { className: "detail__section" },
-      el("p", { className: "label" }, "Maps"),
-      el("p", { className: "quiet" }, "This server publishes neither a map list nor a current map."),
-    );
-  }
-
-  const present = maps.filter((entry) => entry.status.status === "present");
-  const wanted = maps.filter((entry) => entry.status.status !== "present");
-  const resolutions = new Map(
-    (preview?.catalogue?.resolutions ?? []).map((item) => [item.wanted.name, item]),
-  );
-
-  const exact = [];
-  const choose = [];
-  const none = [];
-  const unresolved = [];
-  for (const entry of wanted) {
-    const resolution = resolutions.get(entry.map);
-    if (!resolution) unresolved.push(entry);
-    else if (resolution.outcome === "exact") exact.push(resolution);
-    else if (resolution.outcome === "choice_required") choose.push(resolution);
-    else none.push(resolution);
-  }
-
-  return el(
-    "div",
-    { className: "detail__section" },
-    el("p", { className: "label" }, "Maps"),
-    noRotation
-      ? el("p", { className: "quiet" }, "No rotation published. Only the map running now was checked.")
-      : null,
-    el(
-      "div",
-      { className: "rot" },
-      present.length
-        ? group(
-            `On disk — nothing to do`,
-            el(
-              "p",
-              { className: "quiet indent" },
-              `${plural(present.length, "map")}: ${present
-                .slice(0, 4)
-                .map((entry) => mapName(entry.map))
-                .join(", ")}${present.length > 4 ? `, and ${present.length - 4} more` : ""}`,
-            ),
-          )
-        : null,
-      exact.length
-        ? group(
-            "Matched in the catalogue",
-            exact.map((resolution) =>
-              frag(
-                line("↓", "get", mapName(resolution.wanted.name), bytes(resolution.name_match.file_size)),
-                el("p", { className: "rot__file" }, resolution.name_match.filename),
-              ),
-            ),
-          )
-        : null,
-      choose.length
-        ? group(
-            groupTitle(
-              "Needs your choice",
-              "The catalogue files these under a different name. Reveille never picks for you, and checks the archive contents after downloading.",
-            ),
-            choose.map((resolution) => choiceBlock(resolution)),
-          )
-        : null,
-      none.length
-        ? group(
-            groupTitle(
-              "No source",
-              "You can play here until the rotation reaches these maps, then you are dropped.",
-            ),
-            none.map((resolution) =>
-              frag(
-                line("✕", "none", mapName(resolution.wanted.name), "—"),
-                el("p", { className: "rot__file" }, "Not in any catalogue Reveille can reach."),
-              ),
-            ),
-          )
-        : null,
-      unresolved.length
-        ? group(
-            "Missing locally",
-            unresolved.map((entry) =>
-              line(
-                entry.status.status === "absent" ? "•" : "≠",
-                "choose",
-                mapName(entry.map),
-                entry.status.status === "absent" ? "not on disk" : "different file",
-              ),
-            ),
-          )
-        : null,
-    ),
-  );
-}
-
-function group(title, ...children) {
-  const [text, hint] = Array.isArray(title) ? title : [title, null];
-  return el(
-    "div",
-    { className: "rot__group" },
-    el("p", { className: "label group-title", title: hint }, text),
-    children,
-  );
-}
-
-/** A group heading whose explanation is a tooltip rather than a paragraph. */
-function groupTitle(text, hint) {
-  return [text, hint];
 }
 
 function line(mark, kind, name, trailing) {
@@ -532,7 +466,7 @@ function installItem(item) {
     item.total && item.total > 0 ? Math.min(100, Math.round((item.received / item.total) * 100)) : 0;
   let stateText = "waiting";
   if (item.phase === "downloading") stateText = `${bytes(item.received)} / ${bytes(item.total)}`;
-  else if (item.phase === "confirming") stateText = "checking archive";
+  else if (item.phase === "confirming") stateText = "checking the file";
   else if (item.phase === "installed") stateText = "installed";
   else if (item.phase === "failed") stateText = "failed";
 
@@ -575,7 +509,7 @@ function outcomeSection(result) {
       "p",
       { className: "quiet" },
       launched
-        ? `${GAME_LABELS[result.game] ?? "The game"} is connecting. Bans, a full server and ping limits are the server's call from here.`
+        ? `${GAME_LABELS[result.game] ?? "The game"} is connecting. The server decides the rest: bans, a full server, and its own ping limits.`
         : result.outcome.reason,
     ),
     result.installed.length
@@ -626,9 +560,22 @@ function outcomeSection(result) {
  * A missing checksum in particular means "compatible" was decided on names alone, and saying so
  * is what keeps that word honest.
  */
-function caveats(server) {
+/**
+ * The two things about this server that qualify what Reveille checked.
+ *
+ * Each is drawn only where it changes something (docs/ui.md §9).
+ *
+ * **Sends no files** is about maps that are missing, so it is silent when none are: telling a
+ * player that a server they can already join will not send them anything is a sentence about a
+ * situation they are not in.
+ *
+ * **No map checksum** is drawn always, including on a server with nothing to fetch, because it
+ * qualifies the reading itself. Every "on disk" in this pane was decided by name alone, and that
+ * is the one caveat a ready server does not get to keep quiet about.
+ */
+function caveats(server, ready) {
   const notes = [];
-  if (server.allow_download === 0) {
+  if (server.allow_download === 0 && !ready) {
     notes.push("Sends no files — anything missing has to be here before you join.");
   }
   if (server.map_checksum === null || server.map_checksum === undefined) {
@@ -708,7 +655,7 @@ function actionBar(row, onJoin) {
       el(
         "button",
         { type: "button", className: "btn btn--block", onclick: () => update((next) => (next.joinResult = null)) },
-        "Back to the check",
+        "Back to server details",
       ),
     ];
   }
@@ -730,7 +677,7 @@ function actionBar(row, onJoin) {
       el(
         "button",
         { type: "button", className: "btn btn--block", disabled: true },
-        "Cannot join yet",
+        "Cannot join while this map is running",
       ),
     ];
   }
@@ -791,7 +738,7 @@ function actionBar(row, onJoin) {
 function joinLabel(kind, totals) {
   if (totals.count > 0) return `Get ${bytes(totals.size)} & join`;
   if (kind === "compatible") return "Join";
-  if (kind === "cant_tell") return "Join without a rotation check";
+  if (kind === "cant_tell") return "Join without a map list";
   return "Join anyway";
 }
 

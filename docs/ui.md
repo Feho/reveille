@@ -51,12 +51,26 @@ rows cannot see which of them costs a download without clicking each one. That i
 regression against F6, and the reason to restore the column if it is ever missed.
 
 What it does **not** cost is honesty. The four state names were never in the column — they live in
-the detail pane under **Join check**, which is where the decision is actually made, and the join
-gate (§5) is unchanged. Rule H3 is satisfied there, not here.
+the detail pane, which is where the decision is actually made, and the join gate (§5) is unchanged.
+Rule H3 is satisfied there, not here.
 
-The rejection above still stands with full force: if a verdict ever returns to the list, it must
-return as a **price**, never as a badge, a colour or a tick. The table above records what that
-looked like, so it does not have to be re-derived.
+**It came back on 27 Aug 2026 and was removed again the same day**, by the project owner. It
+returned on exactly the terms the paragraph below sets — a colourless price, never a badge — and it
+priced correctly. What it could not pay for was its width. The only place to take 146px from was
+**Mode**, either directly or through the breakpoint that drops Mode on a narrow window, and Mode is
+what a player narrows the list by before anything else: someone looking for Objective is not served
+by knowing what every deathmatch server would cost them. The column answered, on every row, a
+question that gets asked about one row.
+
+So the regression recorded above stands, and stands deliberately: **the download price is visible
+only after a server is selected.** Restoring the column is not the fix for it. If it is ever missed
+badly enough to act on, the thing to reach for is a cheaper answer in the place the question is
+actually asked — the detail pane, where the join is decided — not a column charged to every row.
+
+The rejection below still stands with full force: if a *verdict* ever returns to the list, it must
+return as a price, never as a badge, a colour or a tick. And a price must arrive with its own
+width, not out of Mode's. The table below records what the column looked like both times, so it
+does not have to be re-derived.
 
 | State | Cell it used to render | Colour |
 |---|---|---|
@@ -69,12 +83,44 @@ looked like, so it does not have to be re-derived.
 A **Hide unavailable maps** toggle survived the removal for a while, filtering on a state the list
 no longer showed. It has since been dropped: a control whose effect is invisible cannot be judged
 by the player pressing it, and rows vanishing for a reason nothing on screen states is worse than
-the rows being there. `Has people` is now the only toggle. The **no "only compatible" filter**
-prohibition below always covered this ground anyway.
+the rows being there. The **no "only compatible" filter** prohibition below always covered this
+ground anyway, and it covered the Needs column too while that existed: a column prices, it does
+not gate.
 
-**The four canonical state names still exist and are unchanged** — `Compatible`, `Needs N maps`,
-`No source`, `Can't tell`. They appear in the detail pane, under **Join check**, where the decision
-is actually made and there is room to explain them. The list does not repeat them as badges.
+The toolbar carries two filters, and both gate on a figure the list draws:
+
+- **Not empty** — at least one occupied slot. Called `Has people` until 27 Aug 2026: a slot counts
+  while its holder is still connecting or downloading, so a figure of occupied slots is not a count
+  of people at play, and the toolbar may not claim otherwise. The state key moved with the label,
+  because an identifier that reads as a claim is how the claim gets back onto the screen.
+- **Ping under** — a ceiling on the round trip, `Any` by default. Sorting a column is not filtering
+  on it: sorting by players surfaces full servers on the far side of the world, and shipping the
+  sort without the gate is a documented failure across several modern browsers
+  (`docs/ux-standards.md` §7). A server that published no round trip is **not** hidden by a ceiling
+  it cannot be measured against.
+
+Whenever either is narrowing the list, the status bar says by how much — `61 of 114 shown`. Without
+it the only feedback a filter ever gives is "Nothing matches", and it arrives only once the filter
+has hidden everything.
+
+**The four canonical states still exist**, and as of 26 Aug 2026 each is named for what Reveille
+measured rather than for how sure it feels: `Compatible`, `Needs N maps`, `No download for N maps`,
+`Map list not published`. Three of them are drawn in the detail pane, where the decision is actually
+made and there is room to explain them. The list does not repeat them as badges.
+
+`Compatible` is drawn **nowhere**, as of 27 Aug 2026. A ready server's detail pane shows its name,
+its address, the map, when it was measured, and a button reading `Join`. A heading saying
+`Compatible` over that button restates the control beneath it, and §9's rule — *a ready server says
+nothing* — had been written down for a month before the interface obeyed it. Rule H3 is unaffected:
+it forbids collapsing four states into a boolean, and a state with nothing to qualify is still not
+the same state as one that has.
+
+The two renames replaced verbal hedges — `No source` and `Can't tell` — with the measurement each
+one stood for. A hedge expressed as a mood word costs a reader trust in the figure and in the
+source; the same fact expressed as a measurement costs almost none (van der Bles et al., PNAS 2020;
+`docs/ux-standards.md` §1.1). This tightens the honesty rules rather than relaxing them: the name
+now states the observation and leaves the verdict to the player. Enforced in `lib/format.js`
+`stateName`.
 
 There is deliberately **no "only compatible" filter**. It would rebuild the traffic light out of
 controls instead of colour.
@@ -162,7 +208,7 @@ There is **one** primary surface. The three-screen wizard was removed.
       the two scopes that have absent rows — visibly narrower than `All`, which has none.
       `columnsShown()` reads the count off the header row, so the media queries stay the one place
       the drop order is written down, and a resize that crosses a breakpoint repaints the rows.
-- **Mode** — a column between **Map now** and **Ping**, carrying `g_gametypestring` exactly as the
+- **Mode** — a column between **Map** and **Ping**, carrying `g_gametypestring` exactly as the
   server spelled it: `Objective-Match`, `Free-For-All`, `Round-Based-Match`. The stock engine sets
   it to one of seven labels (`gamecvars.cpp:560-578`), but it is an ordinary server cvar and a mod
   may publish anything, so the value is **never** mapped onto a fixed set or shortened to
@@ -175,7 +221,7 @@ There is **one** primary surface. The three-screen wizard was removed.
   name is what those breakpoints protect, and two servers you cannot tell apart cost more than any
   of the three.
 - **A remembered server the current check did not return** stays in the list as an *absent* row:
-  its star, its address, its name in the italic *remembered* style, the words **not in this check**
+  its star, its address, its name in the italic *remembered* style, the words **not in this list**
   across the columns, and a **Check** button. Nothing else — no client count, no map, no round trip, because those were true
   of a past moment (rule **H12**). A bookmark is an address, so it outlives the game it was saved
   under: one that answers for another of the three stays an absent row reading **runs Spearhead**
@@ -203,7 +249,7 @@ There is **one** primary surface. The three-screen wizard was removed.
   removed **Hide unavailable maps** (§2.1). And it must never fold on a *stored game*: Reveille
   does not know which game a saved address runs, a bookmark is an address (**H12**), and a
   remembered "last seen under Spearhead" would hide a server that has since moved under the very
-  game it now runs. The criterion is the one the rows already state — this check did not return
+  game it now runs. The criterion is the one the rows already state — this list does not hold
   them.
   **Check the other N** in the status bar is drawn only while the block is open, because the whole
   of its effect is inside the block. The status bar's own count (**3 of 11 favourites in this
@@ -249,21 +295,21 @@ Change a rule in the register first, then update the right-hand column here.
 
 | Rule | How the interface satisfies it |
 |---|---|
-| **H1** · Never call a client count "players" or "humans" | The column is **Clients**. Its tooltip says "Occupied slots reported by every server. Not verified as people." |
+| **H1** · Never call a client count "humans", and never fold bots into it | **Amended 27 Aug 2026:** the column is now `Players` — see `docs/rules.md` H1 for the measurement that allows it. The toolbar filter is **Not empty**, never "Has people"; bots are drawn beside the figure and never added to it. The glossary defines **Players** and **Bots** in reachable text. *Gap: the status bar's qualifier is still a `title` on a span, and the column header carries no tooltip at all — this row once claimed one that `headerCell()` never built.* |
 | **H2** · Bots are disjoint from clients | Rendered on their own line as `+8 bots`, never summed into the client figure. The status bar says "counted separately". |
 | **H7** · Never imply free slots | Capacity appears only as a denominator (`21/32`). `capacity - clients` is never computed. |
 | **H3** · Never emit a boolean "can I join" | Four states, never a tick. `Compatible` is explained as "that is all Reveille can check — the server still decides whether you get in." |
 | **H4** · Never report a moh-db download as verified | Candidate rows show `tested` (the catalogue's own flag) and never "verified". Where a server publishes no checksum, the detail pane says an exact-file match cannot be confirmed. |
 | **H5** · Never imply the release digest proves publisher authenticity | Visible setup copy promises only that Reveille checks whether the download arrived intact; it never calls the file safe or the publisher verified. The release page's exact file check is optional tooltip detail, not newcomer-facing copy. |
-| **H6** · Never state a cause that was not observed | Engine failures are classified in Rust (`OpenMohaaFailureKind`), never by matching message text in the shell. A release that publishes no file check was never downloaded and says so; only a size or digest mismatch may say the download did not arrive intact. An unclassified failure shows its own text rather than borrowing a cause. The original message stays as tooltip detail. |
+| **H6** · Never state a cause that was not observed | Engine failures are classified in Rust (`OpenMohaaFailureKind`), and since 27 Aug 2026 so are sweep failures (`BrowseFailureKind`: `NoNetwork`, `MasterUnreachable`, `MasterUnreadable`, `Internal`) — never by matching message text in the shell. `NoNetwork` is reserved for local routing, address, or permission failures; a TCP refusal or reset by the remote master is `MasterUnreachable`, never evidence that the player's PC is offline. A per-map catalogue non-result renders as a sentence rather than through `{:?}`. A release that publishes no file check was never downloaded and says so; only a size or digest mismatch may say the download did not arrive intact. An unclassified failure shows its own text rather than borrowing a cause. The original message stays as tooltip detail. |
 | **C3** · Never auto-apply an ambiguous match | Choice radios start with **nothing selected**. The total excludes unresolved maps and the pane says how many still need a choice. |
 | **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\openmohaa\<game directory>` path, not a euphemism. |
 | **H13** · Index the whole search path | An expansion session indexes `main` underneath `mainta` or `maintt`, so a base-game map is never reported as missing on a Spearhead or Breakthrough server. |
 | **H14** · Never offer a game the folder has no files for | The **Game** switch lists only the products detected in the folder, and is hidden entirely when there is one. |
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
 | **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. |
-| **H11** · Never call the measured round trip the in-game ping | The column is **Ping** because that is the word players look for, but every explanation is the honest one: the tooltip says "Time for one status request to this server and back, measured once during this check. Not the in-game ping." The figure carries no colour, no bars and no bands — it is a measurement to sort by, not a verdict, for the same reason the list carries no traffic light. |
-| **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favourite says **not in this check** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. A live row says when it was measured (**Checked at 14:32**) and is dropped outright when a later check finds the server gone. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
+| **H11** · Never call the measured round trip the in-game ping | The column is **Ping** because that is the word players look for, but every explanation is the honest one: the tooltip says "Time for one status request to this server and back, measured once during this check. Not the in-game ping." The figure carries no colour, no bars and no bands — it is a measurement to sort by, not a verdict, for the same reason the list carries no traffic light. The toolbar's **Ping under** gate names itself after the column, so the control and the figure make the same claim. |
+| **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favourite says **not in this list** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. A live row says when it was measured (**Checked at 14:32**) and is dropped outright when a later check finds the server gone. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
 | **S2** · Never change engine files while an affected program is running | Installation and Original/Reborn activation are blocked unless the relevant process query confirms stopped. Unknown is blocking, not permission. |
 | **S5** · Preserve original executables before installing Reborn | Reborn installation retains first-seen originals. Switching changes the active canonical copies and never describes either managed engine as uninstalled. |
 
@@ -275,10 +321,19 @@ because the two are not the same set: an admin can load a map directly, and a se
 current map while publishing no rotation at all. Checking only the rotation missed the case that
 matters most, and left the running map out of the shopping list so it could not even be fetched.
 
-A server that published no rotation stays `Can't tell` even so. Its one checked map is real
-evidence, but calling it `Compatible` would claim a rotation check that never happened. The detail
-pane heads the section **Maps**, not Rotation, and says "No rotation published. Only the map running
-now was checked."
+A server that published no rotation stays `Map list not published` even so. Its one checked map is
+real evidence, but calling it `Compatible` would claim a rotation check that never happened. The
+detail pane says so in a sentence — "This server published no map list. Reveille checked only the
+map it is running now." — rather than under a heading, because the sentence is the whole of it.
+
+**The rotation itself is not drawn** (27 Aug 2026). The detail pane used to head a **Maps** section
+and list the published rotation in four groups: on disk, matched in the catalogue, needs your
+choice, no download. Three of the four told the player nothing they could act on — a map already on
+disk needs no row, a resolvable one is already counted in the button's own label, and *which* maps
+have no download changes nothing that can be done about them, so the state name counts them and
+stops. Only the fourth group survives, on its own, because it is the one thing Reveille genuinely
+refuses to decide: which candidate file a map ambiguously matched. The single map that can block a
+join — the one running right now — is named where the block is, in the action bar.
 
 **The gate is about the map running now, not the whole rotation.**
 
@@ -314,7 +369,7 @@ one control, and it names what this join is missing:
 |---|---|---|
 | `Compatible` | `Join` | `false` |
 | Anything to fetch | `Get 9.1 MB & join` | `true` |
-| `Can't tell` | `Join without a rotation check` | `true` |
+| `Map list not published` | `Join without a map list` | `true` |
 | Nothing fetchable left | `Join anyway` | `true` |
 
 An earlier version put a separate confirmation toggle in front of the button. It was two clicks for
@@ -360,13 +415,35 @@ platform v1 supports.
 
 ## 7. Accessibility and interaction
 
-- The server list is a real `<table>` with `<caption>`, `scope="col"` and `aria-sort` — not a grid
-  of buttons. Rows are `tabindex="0"` with `aria-selected`.
-- **Keyboard**: `↑`/`↓`/`Home`/`End` move between rows, `Enter` and `Space` activate, `/` focuses
-  search, `Escape` clears it, `F5` or `Ctrl+R` refreshes the whole list, `R` checks the selected
-  server on its own, `F` stars or unstars it. The modifier is the difference between one probe and
-  a couple of hundred — which is why `R` must never fire from inside a control that has its own use
-  for the letter.
+- The server list is a real `<table>` with `<caption>`, `scope="col"` and `aria-sort`, carrying
+  `role="grid"` with the row and cell roles written out. The role is load-bearing twice over:
+  `aria-selected` is not supported on `row` inside the plain `table` role, so the app's primary
+  interaction was invisible to assistive technology, and a grid is a **composite** widget, which is
+  what licenses the single tab stop below.
+- **One tab stop for the whole table.** Every row carried `tabindex="0"` until 27 Aug 2026, which
+  put the Join button roughly 260 Tab presses from the search box and made the arrow keys the table
+  was designed around redundant. Roving tabindex: the selected row is `0` — the first row when
+  nothing is selected — and every other row and every control inside a row is `-1`. Guarded by
+  `the_server_table_is_one_tab_stop`.
+- **Selection follows focus**, which is the grid convention for a single-select list and what makes
+  the arrow keys worth having. It is not the network storm it used to be: focus now moves only on a
+  deliberate arrow press, and the catalogue lookup behind a selection waits ~220 ms for the
+  selection to hold still (`PREVIEW_SETTLE_MS` in `app.js`). Holding `↓` through twenty rows sends
+  one request, not twenty.
+- **Keyboard**: `↑`/`↓`/`Home`/`End` move between rows — *every* row, so the absent block's
+  disclosure and its **Check** buttons are reachable at all. `→` steps into the row's controls and
+  along them; `←` steps back and, from the first control, returns to the row; `Escape` does the same
+  from anywhere inside a row. `Enter` and `Space` activate. `/` and `Ctrl+F` focus search, `Escape`
+  clears it, `F6` cycles toolbar → list → detail pane, `F5` or `Ctrl+R` refreshes the whole list,
+  `R` checks the selected server on its own, `F` stars or unstars it. The modifier is the
+  difference between one probe and a couple of hundred — which is why `R` must never fire from
+  inside a control that has its own use for the letter.
+- **Right-clicking a row opens Reveille's own menu**, not WebView2's Back/Reload/Inspect — the
+  loudest "web page in a costume" tell a Tauri app can produce, sitting exactly where the native
+  convention for this kind of application puts bookmarking. `Shift+F10` and the Menu key open it
+  from the keyboard. Everything in it is reachable another way; a context menu that *owns* an
+  action is a trap for anyone who does not think to right-click. The browser menu is left alone
+  over anything selectable, where Copy is genuinely what a right-click is for.
 - **A control that disables itself on click uses `aria-disabled`, not `disabled`.** Focus cannot be
   restored to a disabled element after a repaint, so **Check again** — which goes busy the instant
   it is pressed — would take the caret with it every time. It keeps its place in the tab order and
@@ -382,12 +459,22 @@ platform v1 supports.
   game `<select>` is that control's own type-ahead, not a re-check.
 - A row contains buttons — the star, and **Check** on an absent row — so the tbody key handler
   **returns early when the event target is a button**. Without that it swallows `Enter` and
-  `Space` and the controls work with a mouse and are dead to a keyboard. The cost is that the
-  arrow keys do not move rows while focus is inside one of those buttons, which is the right
-  trade: a control that cannot be activated is worse than one that cannot be escaped by arrow.
+  `Space` and the controls work with a mouse and are dead to a keyboard. The cost is that `↑` and
+  `↓` do not move rows while focus is inside one of those buttons, which is the right trade: a
+  control that cannot be activated is worse than one that cannot be escaped by arrow. Roving
+  tabindex preserved it, and `←`/`Escape` now give the way out that trade used to lack.
+- **The sort buttons in the header stay in the ordinary tab order** rather than joining the roving
+  tabindex. There are five of them, not two hundred, and folding them in would make the one control
+  that reorders the list reachable only by first entering the rows it reorders.
 - `:focus-visible` shows a brass ring on every interactive element. Outlines are never removed.
 - A `role="status" aria-live="polite"` region announces sweep progress and state changes.
-  `role="alert"` is reserved for genuine errors.
+  `role="alert"` is reserved for genuine errors. **Sweep progress is coarsened to quarters** before
+  it is announced — start, three milestones, then the summary — and the milestone text deliberately
+  carries no running count, which would make the string differ on every probe and defeat the point.
+  A sweep emits one event per probed endpoint, so restating "N of M done" on each sent a screen
+  reader roughly two hundred announcements per sweep, which `docs/ux-standards.md` §5.7 calls a
+  denial of service against the one output a blind player has. Guarded by
+  `sweep_progress_is_announced_at_milestones_rather_than_per_probe`.
 - All motion respects `prefers-reduced-motion`.
 - Progress is determinate wherever a total is known (`78/190`, byte counts) and indeterminate only
   during the master handshake, where nothing is known yet.
@@ -434,7 +521,7 @@ not reintroduce a blanket rebuild of any region containing a text input.**
   is short and comparable. `version` is a sentence — "Medal of Honor Allied Assault 1.11 win-x86
   Mar 5 2002" — which truncates to "Medal of Honor Allied" in every row and distinguishes nothing.
   The full string is the row's tooltip. The detail pane does not repeat either: compatibility is
-  what the player is deciding, and the Join check states it outright, so a version number there is
+  what the player is deciding, and the join verdict states it outright, so a version number there is
   a fact with no next click attached.
 
 ## 9. Copy
@@ -464,7 +551,7 @@ The rule: **an explanation earns a paragraph only if it changes the next click.*
 
 - Say "Launched", never "Joined" or "Played". Reveille started the game and saw it start; the
   server decides admission at connect time and never tells Reveille the answer.
-- Say "not in this check" for a saved server the sweep did not return, and "did not answer" only
+- Say "not in this list" for a saved server the sweep did not return, and "did not answer" only
   after a check actually ran and failed. The two are different facts: most absences mean the
   server was never asked.
 - Say "clients", never "players".

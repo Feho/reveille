@@ -2,19 +2,27 @@
 
 // The server list: toolbar, table, status bar.
 //
-// The table is a real <table> with header semantics and arrow-key row movement,
-// not a grid of buttons, so a screen reader and a keyboard both get a list of
-// servers rather than a pile of controls.
+// The table is a real <table> carrying `role="grid"`, so a screen reader gets a
+// list of servers rather than a pile of controls, and a keyboard gets **one** tab
+// stop for the whole thing. Every row used to be its own tab stop, which put the
+// Join button roughly 260 Tab presses from the search box and made the arrow keys
+// redundant; worse, focusing a row selected it, so arrowing down twenty rows fired
+// twenty catalogue lookups at a third-party service (docs/design-review.md F4).
+// A composite widget is one tab stop: the selected row holds `tabindex="0"` and
+// every other row and in-row control holds `tabindex="-1"`.
 //
-// The list states no compatibility verdict at all — no badge, no green, no amber.
-// See docs/ui.md §2.1: a status traffic light trains people to click only green,
-// which would push roughly a quarter of the live population behind a colour that
-// reads as a warning when it actually means "one click of downloads". What a
-// server costs is said in the detail pane, where there is room to say it in the
-// four canonical state names rather than a coloured word.
+// The list states no compatibility *verdict* — no badge, no green, no amber. See
+// docs/ui.md §2.1: a status traffic light trains people to click only green, which
+// would push roughly a quarter of the live population behind a colour that reads as
+// a warning when it actually means "one click of downloads". What it does carry, in
+// **Needs**, is the *price*: a countable quantity, colourless except for the one
+// state a download cannot fix. The four canonical state names stay in the detail
+// pane, where the decision is made and there is room to explain them.
 
 import { el, fill, preserveFocus } from "../lib/dom.js";
+import { openMenu } from "../lib/menu.js";
 import {
+  browseFailureText,
   gameType,
   launchedLabel,
   mapName,
@@ -33,7 +41,10 @@ import {
 } from "../lib/bookmarks.js";
 import {
   GAME_LABELS,
+  PING_LIMITS,
   SCOPES,
+  canRecheck,
+  filtering,
   playableGames,
   savedEntries,
   saveFilters,
@@ -48,13 +59,21 @@ const COLUMNS = [
   // accessible name carries the meaning instead.
   { key: "star", label: "Favourite", sortable: false, className: "col-star", hideLabel: true },
   { key: "name", label: "Server", sortable: true, className: "col-name" },
-  { key: "clients", label: "Clients", sortable: true, numeric: true, className: "col-clients" },
-  { key: "map", label: "Map now", sortable: true, className: "col-map" },
+  // "Players", not "Clients": `numplayers` is `SV_NumClients()` and bots are *not* in
+  // `svs.clients` — measured live on all 11 bot servers (docs/plan.md, milestone 2). So the
+  // figure counts human connections, and the bot count beside it is disjoint. It is still a
+  // count of connections rather than of people at keyboards: a slot held by someone still
+  // downloading is in it. The glossary says so; the column heading does not, because a heading
+  // that hedges its own noun is read as a warning about the number rather than about the word.
+  { key: "clients", label: "Players", sortable: true, numeric: true, className: "col-clients" },
+  // "Map", not "Map now". Nothing else in the row is a map, and no other column is qualified by
+  // when it was measured — the freshness of the whole row is stated once, in the detail pane.
+  { key: "map", label: "Map", sortable: true, className: "col-map" },
   // The gametype the server publishes, in its own spelling — see `gameType` in lib/format.js
   // for why it is not shortened to FFA/OBJ/TDM.
   { key: "mode", label: "Mode", sortable: true, className: "col-mode" },
   // Ascending first: on a distance column the useful end is the small one, which is the
-  // opposite of Clients, where the busy servers are what a player is looking for.
+  // opposite of Players, where the busy servers are what a player is looking for.
   {
     key: "ping",
     label: "Ping",
@@ -63,6 +82,12 @@ const COLUMNS = [
     defaultDirection: "asc",
     className: "col-ping",
   },
+  // A **Needs** column, pricing each server in maps to download, was added on 27 Aug 2026 and
+  // removed the same day. It was not wrong — docs/ui.md §2.1 pre-authorised its return as a
+  // *price*, and it did answer "which of these can I just join?" without a click each. It cost
+  // more than it answered: a column on every row for a question asked about one row, drawn in a
+  // width that had to come out of **Mode**, which is what a player filters the list by before
+  // anything else. The price is in the detail pane, where the join is decided.
   { key: "runs", label: "Runs", sortable: false, className: "col-runs" },
 ];
 
@@ -70,7 +95,7 @@ const COLUMNS = [
  * How many columns the table is actually drawing right now.
  *
  * Not `COLUMNS.length`: the narrow-window media queries in `styles/views.css` drop Runs, then
- * Mode, then Ping, and a dropped column is gone from the table, not merely invisible. Every
+ * Ping, and a dropped column is gone from the table, not merely invisible. Every
  * `colspan` here has to agree with that or it runs off the end of the row — and a `colspan` that
  * overruns is not clipped. Chromium answers it by inventing the column the span asked for and
  * splitting the free width evenly between that phantom and **Server**, the only column with no
@@ -92,7 +117,7 @@ const SCOPE_LABELS = { all: "All", favourites: "Favourites", history: "History" 
 
 const CAPTIONS = {
   all: "Servers answering now",
-  favourites: "Starred servers, and whether this check reached them",
+  favourites: "Starred servers, and whether they are in this list",
   history: "Servers Reveille launched the game for, most recent first",
 };
 
@@ -171,11 +196,44 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     gameSelect,
   );
 
-  const hasPeople = toggle("Has people", () =>
+  // "Not empty", never "Has people". The figure this gates on is occupied slots, and a slot counts
+  // from `connect` onwards — so it counts a player still downloading or sitting at a menu, and a
+  // stale connection the server has not timed out yet. Enough to say a server is not empty; not
+  // enough to promise people (rule H1, docs/design-review.md F7).
+  const notEmpty = toggle("Not empty", () =>
     update((next) => {
-      next.filters.hasPeople = !next.filters.hasPeople;
+      next.filters.notEmpty = !next.filters.notEmpty;
       saveFilters();
     }),
+  );
+
+  // The ping gate. Sorting by a column is not filtering on it: sorting by players surfaces full
+  // servers on the far side of the world, and shipping the sort without the gate is a documented
+  // failure across several modern browsers (docs/design-review.md F15).
+  const pingSelect = el("select", {
+    id: "ping-limit",
+    dataset: { focusKey: "ping-limit" },
+    onchange: (event) =>
+      update((next) => {
+        const value = event.target.value;
+        next.filters.maxPing = value === "" ? null : Number(value);
+        saveFilters();
+      }),
+  });
+  fill(
+    pingSelect,
+    ...PING_LIMITS.map((limit) =>
+      el("option", { value: limit === null ? "" : String(limit) }, limit === null ? "Any" : `${limit} ms`),
+    ),
+  );
+  const pingField = el(
+    "label",
+    { className: "toolbar__ping", for: "ping-limit" },
+    // "Round trip", not "ping under": the figure this gates is one UDP sample taken during the
+    // sweep, which is what the Ping column says too. Naming the control after the column keeps the
+    // two the same claim.
+    el("span", { className: "label" }, "Ping under"),
+    pingSelect,
   );
   // Both browse controls are built once and shown or hidden, never rebuilt. A
   // sweep notifies several times a second, and replacing a button between its
@@ -183,7 +241,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
   const meterFill = el("span", { className: "meter__fill" });
   const meter = el(
     "div",
-    { className: "meter", role: "progressbar", "aria-label": "Checking servers" },
+    { className: "meter", role: "progressbar", "aria-label": "Getting the server list" },
     meterFill,
   );
   const meterCount = el("span", { className: "quiet data" });
@@ -215,21 +273,44 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
       el("span", { className: "field__icon", "aria-hidden": "true" }, "⌕"),
       search,
     ),
-    hasPeople,
+    notEmpty,
+    pingField,
     el("span", { className: "toolbar__spacer" }),
     actionSlot,
   );
-  const tbody = el("tbody", { onkeydown: (event) => onRowKey(event, onSelect) });
+  const tbody = el("tbody", {
+    onkeydown: (event) => {
+      // Shift+F10 and the Menu key are how a keyboard opens a context menu on Windows. Without
+      // them the menu below would be a mouse-only feature, which is what makes a context menu an
+      // accessibility problem rather than a convention.
+      if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+        onRowContextMenu(event, onSelect, onCheck);
+        return;
+      }
+      onRowKey(event, onSelect);
+    },
+    oncontextmenu: (event) => onRowContextMenu(event, onSelect, onCheck),
+  });
   // Header cells are built once and their sort state written in place. Rebuilding them left the
   // arrow and the highlight frozen on whichever column was sorted when the view was created.
   const headers = COLUMNS.map(headerCell);
+  // `role="grid"`, with the row and cell roles written out rather than left to the HTML-AAM
+  // mapping. Two things depend on it. `aria-selected` is not supported on `row` inside the plain
+  // `table` role, so the app's primary interaction — which server is selected — was invisible to
+  // assistive technology (docs/design-review.md F11). And a grid is a **composite** widget, which
+  // is what licenses the single tab stop below.
   const table = el(
     "table",
-    { className: "servers" },
+    { className: "servers", role: "grid", "aria-label": "Servers" },
     el("caption", { className: "sr-only" }),
-    el("thead", null, el("tr", null, headers.map((header) => header.th))),
+    el(
+      "thead",
+      { role: "rowgroup" },
+      el("tr", { role: "row" }, headers.map((header) => header.th)),
+    ),
     tbody,
   );
+  tbody.setAttribute("role", "rowgroup");
   const caption = table.querySelector("caption");
   const listPane = el("div", { className: "list-pane" }, table);
   const statusbar = el("div", { className: "statusbar" });
@@ -313,10 +394,33 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     }
   };
 
+  /**
+   * The selection, and the one tab stop that goes with it.
+   *
+   * Roving tabindex: exactly one row in the grid is tabbable, and it is the selected one — or the
+   * first row when nothing is selected yet, so Tab into an untouched list lands somewhere sensible
+   * rather than nowhere. Everything else, rows and the controls inside them, is `-1` and reached
+   * with the arrow keys. Written in place on every render for the same reason the stars are: the
+   * selection changes without changing which rows exist, so `paintRows` correctly skips.
+  */
   const syncSelection = () => {
-    for (const tr of tbody.children) {
-      if (!tr.dataset.address) continue;
-      tr.setAttribute("aria-selected", tr.dataset.address === state.selected ? "true" : "false");
+    const gridRows = [...tbody.children];
+    const rows = gridRows.filter((tr) => tr.dataset.address);
+    const selected = rows.find((tr) => tr.dataset.address === state.selected);
+    // A saved scope can contain only the disclosure and absent rows. The grid still needs one
+    // entry point: once focus lands on that non-live row, the normal arrow model reaches its
+    // disclosure and Check controls (docs/ui.md §7).
+    const tabbable = selected ?? rows[0] ?? gridRows[0] ?? null;
+    for (const tr of gridRows) {
+      if (tr.dataset.address) {
+        tr.setAttribute("aria-selected", tr === selected ? "true" : "false");
+      }
+      // Absent and disclosure rows are not selectable, but they are still rows in the grid and
+      // still hold controls, so they take the same treatment: never a second tab stop.
+      tr.tabIndex = tr === tabbable ? 0 : -1;
+      for (const control of tr.querySelectorAll("button, input, select, a[href]")) {
+        control.tabIndex = -1;
+      }
     }
   };
 
@@ -357,13 +461,24 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     // Opening the absent block repaints the table the button that opened it lives in, and a
     // keyboard would be left on nothing. The disclosure carries a focus key so it comes back.
     preserveFocus(tbody, () =>
-      fill(tbody, items.length ? items.map(build) : emptyRow(lastColumns)),
+      fill(
+        tbody,
+        // A list left standing after a sweep failed says so in the row above it, not only in the
+        // corner. What is on screen is a past reading, and the one thing it must never do is read
+        // as a current one (docs/ux-standards.md §4.5).
+        state.staleAt ? staleRow(lastColumns) : null,
+        items.length ? items.map(build) : emptyRow(lastColumns),
+      ),
     );
+    // `aria-rowcount` counts the data rows, so a screen reader can say "row 4 of 130" whether or
+    // not the stale banner is drawn.
+    table.setAttribute("aria-rowcount", String(items.length));
     syncSelection();
   };
 
   const render = () => {
-    hasPeople.setAttribute("aria-pressed", state.filters.hasPeople ? "true" : "false");
+    notEmpty.setAttribute("aria-pressed", state.filters.notEmpty ? "true" : "false");
+    pingSelect.value = state.filters.maxPing === null ? "" : String(state.filters.maxPing);
     if (search.value !== state.filters.query) search.value = state.filters.query;
     paintGame();
     paintScope();
@@ -371,7 +486,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     paintHeaders();
     paintAction();
     fill(statusbar, ...statusbarContents(onShowNonResults, onCheck));
-    live.textContent = liveText();
+    announce(live);
 
     const next = signature(scopedRows());
     // The column count is not in the signature — it is not a property of the rows — but crossing a
@@ -406,13 +521,24 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     statusbar,
     live,
     focusSearch: () => search.focus(),
-    focusFirstRow: () => tbody.querySelector("tr[data-address]")?.focus(),
+    // The grid's one tab stop, wherever `syncSelection` put it.
+    focusFirstRow: () => tabbableRow(tbody)?.focus(),
   };
+}
+
+/** The row currently holding the grid's tab stop. */
+function tabbableRow(tbody) {
+  return tbody.querySelector('tr[tabindex="0"]') ?? tbody.querySelector("tr[data-address]");
 }
 
 /** One header cell, plus the nodes whose sort state is written on every render. */
 function headerCell(column) {
+  // The sort buttons stay in the ordinary tab order rather than joining the roving tabindex.
+  // There are five of them, not two hundred, and folding them into the grid's arrow navigation
+  // would make the one control that reorders the list reachable only by first entering the rows
+  // it reorders. The 260-tab-stop problem F4 names is the body, and that is what was fixed.
   const attrs = {
+    role: "columnheader",
     scope: "col",
     className: [column.numeric ? "num" : null, column.className].filter(Boolean).join(" ") || null,
   };
@@ -480,12 +606,14 @@ function starCell(subject, address, hostname, starred) {
   const name = hostname || address;
   return el(
     "td",
-    { className: "col-star" },
+    { role: "gridcell", className: "col-star" },
     el(
       "button",
       {
         type: "button",
         className: "star",
+        // The grid owns the tab order; `syncSelection` rewrites this on every render anyway.
+        tabIndex: -1,
         "aria-pressed": on ? "true" : "false",
         "aria-label": `Favourite ${name}`,
         title: on ? "Remove from favourites" : "Add to favourites",
@@ -511,16 +639,23 @@ function row(item, starred, launches, onSelect) {
   return el(
     "tr",
     {
-      dataset: { address: item.address },
-      tabIndex: 0,
+      role: "row",
+      // The address doubles as the focus key: rows are rebuilt on every paint, and without it a
+      // keyboard player loses the caret whenever a probe lands.
+      dataset: { address: item.address, focusKey: item.address },
+      // Set by `syncSelection`, which owns the single tab stop. Never 0 here.
+      tabIndex: -1,
       "aria-selected": "false",
       onclick: choose,
+      // Selection follows focus, which is the grid convention for a single-select list and what
+      // makes the arrow keys useful. It is no longer a network storm: focus now moves only on a
+      // deliberate arrow press, and the catalogue lookup behind it is debounced (app.js `select`).
       onfocus: choose,
     },
     starCell(item, item.address, item.server.hostname, starred),
     el(
       "td",
-      { className: "col-name" },
+      { role: "gridcell", className: "col-name" },
       el(
         "span",
         { className: "server-name", title: item.server.hostname },
@@ -533,7 +668,7 @@ function row(item, starred, launches, onSelect) {
     ),
     el(
       "td",
-      { className: "num col-clients" },
+      { role: "gridcell", className: "num col-clients" },
       el(
         "span",
         { className: "occupancy" },
@@ -545,7 +680,7 @@ function row(item, starred, launches, onSelect) {
     ),
     el(
       "td",
-      { className: "col-map" },
+      { role: "gridcell", className: "col-map" },
       el(
         "span",
         { className: "map-cell" },
@@ -554,18 +689,22 @@ function row(item, starred, launches, onSelect) {
     ),
     el(
       "td",
-      { className: "col-mode" },
+      { role: "gridcell", className: "col-mode" },
       el("span", { className: "mode-cell", title: mode.title }, mode.text),
     ),
     el(
       "td",
-      { className: "num col-ping" },
+      { role: "gridcell", className: "num col-ping" },
       el("span", { className: "ping-cell", title: ping.title }, ping.text),
     ),
     el(
       "td",
-      { className: "col-runs" },
-      el("span", { className: "runs-cell", title: item.server.version ?? "" }, shortVersion(item.server)),
+      { role: "gridcell", className: "col-runs" },
+      el(
+        "span",
+        { className: "runs-cell", title: item.server.version ?? "" },
+        shortVersion(item.server),
+      ),
     ),
   );
 }
@@ -582,19 +721,19 @@ function savedNoun(count = 0) {
 }
 
 /**
- * The head of the absent block: how many remembered entries this check did not return, and the
+ * The head of the absent block: how many remembered entries this list does not hold, and the
  * control that folds them out of the way.
  *
  * Absent entries used to sit open at the foot of Favourites and History. On a folder with more
  * than one game that is where most of them live for ever — Allied Assault, Spearhead and
  * Breakthrough register with the master separately, so a server starred under one of them is
  * never in another's list and its Check button can only ever find the same thing. Twenty rows of
- * "not in this check" under three that answered reads as a broken list.
+ * "not in this list" under three that answered reads as a broken list.
  *
  * Shut, this is not a filter with an invisible effect (docs/ui.md §2.1, rule H15): the count is on
  * screen, in the row where the entries would have been, and one click brings them back. Nothing is
  * classified, guessed or dropped — the criterion is the same one the rows themselves state, which
- * this check demonstrably did not return.
+ * this list demonstrably does not hold.
  */
 function disclosureRow(count, columns) {
   const open = state.showAbsent;
@@ -603,24 +742,25 @@ function disclosureRow(count, columns) {
   // hidden there for the same reason.
   const check =
     playableGames(state.install).length > 1
-      ? `this ${GAME_LABELS[state.game] ?? state.game} check`
-      : "this check";
+      ? `this ${GAME_LABELS[state.game] ?? state.game} list`
+      : "this list";
   return el(
     "tr",
     // No `data-address`: there is nothing here to select or preview.
-    { className: "row-disclosure" },
+    { role: "row", className: "row-disclosure", tabIndex: -1 },
     el(
       "td",
-      { colspan: String(columns) },
+      { role: "gridcell", colspan: String(columns) },
       el(
         "button",
         {
           type: "button",
           className: "disclosure",
+          tabIndex: -1,
           "aria-expanded": open ? "true" : "false",
           dataset: { focusKey: "absent-disclosure" },
           title:
-            "These weren't in this check's list, so they were never asked. Servers saved under another game always end up here.",
+            "These were not in the list the master server returned, so they were never asked. Servers saved under another game always end up here.",
           onclick: () =>
             update((next) => {
               next.showAbsent = !next.showAbsent;
@@ -642,11 +782,11 @@ function disclosureRow(count, columns) {
  * the row offers instead is the one thing that can change that: check this server on its own.
  *
  * The name is the one remembered thing left on the row, and it is not labelled as such: the row
- * says "not in this check" across the columns where every figure would have been, so there is
+ * says "not in this list" across the columns where every figure would have been, so there is
  * nothing here a reader could take for a current measurement. The italic `--remembered` name
  * carries the rest.
  *
- * The wording is "not in this check", not "offline". The sweep asks the master for a list and
+ * The wording is "not in this list", not "offline". The sweep asks the master for a list and
  * probes what comes back; a server missing from that list was never asked, which is a different
  * fact from not answering. Only a check that actually failed may say the server did not answer.
  */
@@ -657,11 +797,16 @@ function absentRow(entry, starred, launches, columns, onCheck, onGame) {
     "tr",
     // Deliberately no `data-address`: that attribute marks a selectable row, and there is
     // nothing here to select or preview until the server answers.
-    { className: "row-absent", dataset: { remembered: entry.address } },
+    {
+      role: "row",
+      className: "row-absent",
+      tabIndex: -1,
+      dataset: { remembered: entry.address, focusKey: `absent-${entry.address}` },
+    },
     starCell(entry, entry.address, entry.hostname, starred),
     el(
       "td",
-      { className: "col-name" },
+      { role: "gridcell", className: "col-name" },
       el(
         "span",
         { className: "server-name server-name--remembered", title: entry.hostname },
@@ -673,7 +818,7 @@ function absentRow(entry, starred, launches, columns, onCheck, onGame) {
     el(
       "td",
       // The star and the name keep their own cells; the note and its button take everything left.
-      { colspan: String(columns - 2) },
+      { role: "gridcell", colspan: String(columns - 2) },
       el("span", { className: "absent-note" }, absentNote(check)),
       absentAction(entry, check, onCheck, onGame),
     ),
@@ -758,14 +903,35 @@ function absentNote(check) {
     "span",
     {
       title:
-        "This server was not in the list the master server returned for this check, so it was never asked. Check it on its own to find out.",
+        "This server was not in the list the master server returned, so it was never asked. Check it on its own to find out.",
     },
-    "not in this check",
+    "not in this list",
+  );
+}
+
+/**
+ * The row that says the list on screen is not this session's answer.
+ *
+ * It sits above the rows rather than replacing them. A sweep that could not reach the master used
+ * to blank the table, so the centre of the window read "Nothing has been checked yet" while the
+ * corner held an error about a check that had just run — the two contradicting each other with no
+ * next action in either (docs/design-review.md F6). Keeping the rows and marking them is both
+ * more honest and more useful: those servers were real, they simply have not been re-asked.
+ */
+function staleRow(columns) {
+  return el(
+    "tr",
+    { role: "row", className: "row-stale", tabIndex: -1 },
+    el(
+      "td",
+      { role: "gridcell", colspan: String(columns) },
+      el("span", { className: "row-stale__mark", "aria-hidden": "true" }, "⌛"),
+      `This list is from ${state.staleAt}. The check just now did not finish, so these figures have not been re-asked.`,
+    ),
   );
 }
 
 function emptyRow(columns) {
-  const filtering = state.filters.query || state.filters.hasPeople;
   let body;
   // A scope with nothing saved and a scope whose entries are all filtered out are different
   // problems, and only one of them is fixed by clearing the search box.
@@ -783,8 +949,18 @@ function emptyRow(columns) {
     ];
   } else if (state.browse.running) {
     body = [
-      el("h3", null, "Checking servers"),
+      el("h3", null, "Getting the server list"),
       el("p", null, "Rows appear as each server answers."),
+    ];
+  } else if (state.browse.error) {
+    // The centre of the window and the corner now say the same thing. Before this branch existed
+    // the table claimed nothing had ever been checked while the status bar carried a raw error
+    // from the check that had just failed (docs/design-review.md F6).
+    const failure = browseFailureText(state.browse.error);
+    body = [
+      el("h3", null, failure.title),
+      el("p", null, failure.remedy ?? failure.detail),
+      el("p", { className: "quiet" }, "Nothing was reached, so nothing is listed."),
     ];
   } else if (state.servers.length) {
     body = [
@@ -792,7 +968,7 @@ function emptyRow(columns) {
       el(
         "p",
         null,
-        filtering
+        filtering()
           ? "No server matches the current search and filters."
           : "The list is empty for this view.",
       ),
@@ -800,23 +976,42 @@ function emptyRow(columns) {
   } else {
     body = [
       el("h3", null, "No servers yet"),
-      el(
-        "p",
-        null,
-        "Nothing has been checked yet.",
-      ),
+      el("p", null, "Press Find servers to ask the master server who is online."),
     ];
   }
   return el(
     "tr",
-    null,
-    el("td", { colspan: String(columns) }, el("div", { className: "placeholder" }, body)),
+    { role: "row", tabIndex: -1 },
+    el(
+      "td",
+      { role: "gridcell", colspan: String(columns) },
+      el("div", { className: "placeholder" }, body),
+    ),
   );
+}
+
+/**
+ * Why the sweep failed, in the player's words, with the original message kept as detail.
+ *
+ * Every browse failure used to reach the status bar as `error.to_string()` — "GameSpy encryption
+ * key is empty", "master reply body has 42 bytes; expected a multiple of 6" — as the *entire*
+ * status bar. The cause is now classified in Rust beside the errors it names, exactly as engine
+ * failures already were, and the shell chooses the sentence (docs/design-review.md F6).
+ */
+function failureStatus(failure) {
+  const { title, remedy, detail } = browseFailureText(failure);
+  return [
+    el("span", { className: "error" }, title),
+    remedy ? el("span", null, remedy) : null,
+    el("span", { className: "statusbar__spacer" }),
+    // Kept, not hidden: it is what a bug report needs. It is simply no longer the whole message.
+    detail ? el("span", { className: "quiet", title: detail }, "details") : null,
+  ];
 }
 
 function statusbarContents(onShowNonResults, onCheck) {
   const { summary, browse } = state;
-  if (browse.error) return [el("span", { className: "error" }, browse.error)];
+  if (browse.error) return failureStatus(browse.error);
   if (state.scope !== "all") return scopedStatusbar(onCheck);
   if (!summary && !browse.running) return [el("span", null, "Not checked yet")];
 
@@ -825,12 +1020,26 @@ function statusbarContents(onShowNonResults, onCheck) {
   const skipped = summary ? summary.non_results : browse.nonResults;
   return [
     el("span", null, el("strong", null, String(answered)), ` of ${registered} answered`),
+    // How much of the list the search box and the toolbar are hiding. Without it "Nothing matches"
+    // is the only feedback a filter ever gives, and it arrives only once the filter has hidden
+    // everything (docs/ux-standards.md §2, docs/design-review.md F14).
+    filtering() &&
+      state.servers.length > 0 &&
+      el(
+        "span",
+        null,
+        el("strong", null, String(scopedRows().length)),
+        ` of ${state.servers.length} shown`,
+      ),
     summary &&
       el(
         "span",
-        { title: "Occupied slots reported by every server. Not verified as people." },
+        {
+          title:
+            "Occupied slots reported by every server. Bots are not in this figure; a slot held by someone still connecting is.",
+        },
         el("strong", null, String(summary.clients_reported)),
-        " clients reported",
+        " players reported",
       ),
     summary &&
       summary.bots_reported > 0 &&
@@ -874,8 +1083,10 @@ function scopedStatusbar(onCheck) {
         "span",
         null,
         el("strong", null, String(saved.length - missing.length)),
-        ` of ${saved.length} ${savedNoun(saved.length)} in this check`,
+        ` of ${saved.length} ${savedNoun(saved.length)} in this list`,
       ),
+    // No separate "N of M shown" here: the line above already counts the saved set against this
+    // list, and a second ratio beside it would be two different denominators in one status bar.
     // Offered only while the absent block is open. Shut, the whole of its effect — absent rows
     // changing what they say — would happen where nobody could see it, which is the one thing a
     // control in this interface may not do (docs/ui.md §2.1).
@@ -944,6 +1155,45 @@ export function nonResultsBreakdown() {
   ];
 }
 
+/**
+ * Write the live region, at a cadence a screen reader can survive.
+ *
+ * The sweep emits one event per probed endpoint, so a region that simply restated
+ * "N of M done" was firing roughly two hundred announcements per sweep — which is not
+ * progress reporting, it is a denial of service against the one output a blind player has
+ * (docs/ux-standards.md §5.7, docs/design-review.md F23). Progress is announced at quarters
+ * instead: start, three milestones, then the summary. Five utterances rather than two hundred.
+ *
+ * Everything else — a single check, a scope change, a failure — is a discrete event and is
+ * announced when it happens. The text is only assigned when it actually differs, so a render
+ * triggered by something the region does not describe stays silent.
+ */
+function announce(live) {
+  const text = liveText();
+  if (text !== live.textContent) live.textContent = text;
+}
+
+/**
+ * Sweep progress, coarsened to quarters.
+ *
+ * Deliberately carries no live counts. A running total inside the sentence would make the string
+ * differ on every probe and defeat the whole point of the milestone.
+ */
+const SWEEP_MILESTONES = [
+  "A quarter of the servers checked.",
+  "Half of the servers checked.",
+  "Three quarters of the servers checked.",
+];
+
+function sweepLiveText() {
+  const { probed, inspected } = state.browse;
+  if (inspected <= 0) return "Getting the server list. Contacting the master server.";
+  const quarter = Math.min(3, Math.floor((probed / inspected) * 4));
+  return quarter === 0
+    ? `Checking ${inspected} servers.`
+    : SWEEP_MILESTONES[quarter - 1];
+}
+
 function liveText() {
   // A single-server check is a state change with no progress meter and, in All, no row left behind
   // when it fails. It is announced first because it is what the player just asked for.
@@ -958,15 +1208,22 @@ function liveText() {
       `Showing ${savedNoun()}. ${found} of ${saved.length} answered the last check.`,
       // The disclosure says this on screen; a screen reader gets it here rather than only on
       // reaching the row.
-      folded > 0 && `The ${folded} not in this check are folded away.`,
+      folded > 0 && `The ${folded} not in this list are folded away.`,
     ]
       .filter(Boolean)
       .join(" ");
   }
-  if (state.browse.running) {
-    return `Checking servers, ${state.browse.probed} of ${state.browse.inspected} done, ${state.browse.answered} answered.`;
+  if (state.browse.running) return sweepLiveText();
+  if (state.browse.error) {
+    const failure = browseFailureText(state.browse.error);
+    return [
+      failure.title + ".",
+      failure.remedy,
+      state.staleAt && `The list from ${state.staleAt} is still on screen.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
-  if (state.browse.error) return `Server check failed. ${state.browse.error}`;
   if (state.summary) {
     return `${state.summary.getstatus_reachable} servers answered out of ${state.summary.registered} registered.`;
   }
@@ -1000,16 +1257,60 @@ function signature(items) {
   // The checks map changes what an absent row says, so it belongs in the signature — otherwise a
   // finished check would not repaint the row that asked for it.
   const checks = [...state.checks].map(([address, check]) => `${address}${check.status}`).join(",");
-  return `${state.scope}:${state.sort.column}:${state.sort.direction}:${rows}:${checks}`;
+  // `staleAt` draws a row of its own, so a sweep failing on top of a list has to repaint even
+  // though every row it holds is unchanged.
+  return `${state.scope}:${state.sort.column}:${state.sort.direction}:${state.staleAt}:${rows}:${checks}`;
 }
 
+/** Every control inside one row, in visual order. */
+function rowControls(tr) {
+  return [...tr.querySelectorAll("button, input, select, a[href]")];
+}
+
+/**
+ * The grid's keyboard model.
+ *
+ * Focus lives on the **row**. Up and Down move between rows — every row, not only the selectable
+ * ones, so the absent block's disclosure and its Check buttons are reachable at all. Right steps
+ * into the row's controls and along them; Left steps back and, from the first control, returns to
+ * the row. Escape does the same from anywhere inside a row, because a player who arrowed into a
+ * star needs one key to get out again.
+ *
+ * Up and Down deliberately do **nothing** while focus is inside a control. That is a deliberate
+ * trade recorded in docs/design-review.md: leaving a row from inside one of its buttons would
+ * make the star's own arrow behaviour ambiguous, and F4's fix had to preserve it.
+ */
 function onRowKey(event, onSelect) {
+  const current = event.target.closest("tr");
+  if (!current) return;
+  const insideControl = Boolean(event.target.closest("button, input, select, a[href]"));
+  const controls = rowControls(current);
+
+  if (event.key === "Escape" && insideControl) {
+    event.preventDefault();
+    current.focus();
+    return;
+  }
+  if (event.key === "ArrowRight") {
+    const at = controls.indexOf(event.target);
+    const next = controls[at + 1] ?? (insideControl ? null : controls[0]);
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+    return;
+  }
+  if (event.key === "ArrowLeft") {
+    if (!insideControl) return;
+    event.preventDefault();
+    const at = controls.indexOf(event.target);
+    (controls[at - 1] ?? current).focus();
+    return;
+  }
   // A row contains buttons — the star, and Check on an absent row. Swallowing Enter and Space
   // here would leave them working with a mouse and dead to a keyboard.
-  if (event.target.closest("button")) return;
-  const current = event.target.closest("tr[data-address]");
-  if (!current) return;
-  const rows = [...event.currentTarget.querySelectorAll("tr[data-address]")];
+  if (insideControl) return;
+
+  const rows = [...event.currentTarget.children].filter((tr) => tr.tabIndex === 0 || tr.tabIndex === -1);
   const index = rows.indexOf(current);
   if (index === -1) return;
 
@@ -1019,6 +1320,7 @@ function onRowKey(event, onSelect) {
   else if (event.key === "Home") [next] = rows;
   else if (event.key === "End") next = rows.at(-1);
   else if (event.key === "Enter" || event.key === " ") {
+    if (!current.dataset.address) return;
     event.preventDefault();
     onSelect(current.dataset.address, { activate: true });
     return;
@@ -1026,4 +1328,61 @@ function onRowKey(event, onSelect) {
 
   event.preventDefault();
   next?.focus();
+}
+
+/**
+ * The row context menu.
+ *
+ * Right-clicking a row used to open WebView2's own menu — Back, Reload, Inspect — which is the
+ * loudest "this is a web page in a costume" tell a Tauri app can produce, and it sits exactly
+ * where Doomseeker has offered right-click-to-bookmark for twenty years
+ * (docs/ux-standards.md §7.3, docs/design-review.md F22).
+ *
+ * Every entry here duplicates something already reachable another way. A context menu that is the
+ * only route to an action is a trap for anyone who does not think to right-click.
+ */
+function onRowContextMenu(event, onSelect, onCheck) {
+  const tr = event.target.closest("tr[data-address], tr[data-remembered]");
+  if (!tr) return;
+  const address = tr.dataset.address ?? tr.dataset.remembered;
+  event.preventDefault();
+  event.stopPropagation();
+  if (tr.dataset.address && state.selected !== address) onSelect(address);
+
+  const live = state.servers.find((item) => item.address === address) ?? null;
+  const saved = savedEntries().find((entry) => entry.address === address) ?? null;
+  const subject = live ?? saved;
+  const starred = favouriteAddresses().has(address);
+  const queryPort = live
+    ? Number(live.server.endpoint.query_port)
+    : (saved?.queryPort ?? null);
+
+  openMenu(
+    [
+      subject && {
+        label: starred ? "Remove from favourites" : "Add to favourites",
+        hint: "F",
+        onSelect: () => {
+          toggleFavourite(subject);
+          update(() => {});
+        },
+      },
+      queryPort !== null && {
+        label: "Check this server",
+        hint: "R",
+        disabled: !canRecheck(address),
+        onSelect: () => onCheck({ address, queryPort }),
+      },
+      {
+        label: "Copy address",
+        onSelect: () => {
+          // No confirmation and no failure notice: the clipboard is unavailable in exactly the
+          // contexts where saying so helps nobody, and this is a convenience, not a result.
+          navigator.clipboard?.writeText(address).catch(() => {});
+        },
+      },
+    ].filter(Boolean),
+    event,
+    tr,
+  );
 }

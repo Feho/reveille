@@ -90,3 +90,18 @@ export function errorText(error) {
   if (error && typeof error.message === "string") return error.message;
   return String(error);
 }
+
+/**
+ * `browse_servers` is the one command that rejects with a classified failure rather than a string.
+ *
+ * `{ kind, detail }`, where `kind` is decided in Rust beside the errors it names — the shell must
+ * never read a cause out of a formatted message, which is how "no internet" and "the master sent
+ * nonsense" ended up as the same unreadable line (docs/design-review.md F6). Anything else that
+ * reaches this is carried through as `internal` with its own message intact.
+ */
+export function browseFailure(error) {
+  if (error && typeof error === "object" && typeof error.kind === "string") {
+    return { kind: error.kind, detail: String(error.detail ?? "") };
+  }
+  return { kind: "internal", detail: errorText(error) };
+}

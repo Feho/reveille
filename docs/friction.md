@@ -120,11 +120,11 @@ nobody on their first run and potentially everybody after it.
 asking for it**, and the two figures that would make it Measured are not collected: how often a
 returning player looks for a specific server, and how often a server they starred is absent from
 a given sweep. The second one is now cheap to measure — the Favourites status bar computes
-"N of M in this check" on every sweep — and is worth capturing before this entry is ranked
+"N of M in this list" on every sweep — and is worth capturing before this entry is ranked
 against anything above it.
 **What Reveille does** A star on every row, and two extra list scopes: **Favourites** and
 **History**. A saved server the current sweep did not return is not hidden and not drawn with the
-figures it had last time — it says "not in this check" and offers a **Check** button that runs
+figures it had last time — it says "not in this list" and offers a **Check** button that runs
 the same probe against that one address, without a master list. That last part is the point: the
 master's list is not the population, and a server missing from it was previously unjoinable in
 Reveille at all.
