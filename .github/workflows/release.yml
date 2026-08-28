@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+name: Release
+
+# A tag builds the Windows installer and attaches it to a *draft* release. Publishing stays a
+# deliberate act by the owner. Manual runs build the same installer and leave it as a workflow
+# artifact, so the packaging can be exercised without minting a release.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/reveille-app/package-lock.json
+
+      # The Tauri CLI is a devDependency of the shell rather than a cargo subcommand, so this
+      # installs the pinned binary instead of compiling one.
+      - name: Install the Tauri CLI
+        working-directory: crates/reveille-app
+        run: npm ci
+
+      # The NSIS bundler installs the WebView2 Evergreen runtime when the machine lacks it, and
+      # installs per user, so nothing here needs Administrator. Writing content into a game
+      # directory is a separate question the app answers at runtime.
+      #
+      # Signing plugs in at `bundle.windows.signCommand` in tauri.conf.json, not here: the
+      # bundler invokes it for every file it produces, which is the only way the app executable
+      # inside the installer gets signed as well as the installer itself.
+      - name: Build the NSIS installer
+        working-directory: crates/reveille-app
+        run: npx -- tauri build -- --locked
+
+      - name: Record the installer's SHA-256
+        id: installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Glob expansion, not `ls`: an `ls` aliased to -F appends a type marker to the name and
+          # the path stops resolving.
+          shopt -s nullglob
+          installers=(target/release/bundle/nsis/*-setup.exe)
+          if [ "${#installers[@]}" -ne 1 ]; then
+            echo "expected exactly one NSIS installer, found ${#installers[@]}" >&2
+            exit 1
+          fi
+          path="${installers[0]}"
+          digest=$(sha256sum "$path" | cut -d' ' -f1)
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          # Printed by the machine that built the file, into a public log. Be honest about what
+          # that buys: it defends against a corrupted download or a bad CDN edge, not against a
+          # compromised account, because it travels from the same origin as the download.
+          {
+            echo "### Windows installer"
+            echo
+            echo "\`$(basename "$path")\`"
+            echo
+            echo "SHA-256: \`$digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reveille-windows-installer
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+      - name: Attach the installer to a draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLER: ${{ steps.installer.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != "true" ]; then
+              echo "refusing to replace an installer on published release $tag" >&2
+              exit 1
+            fi
+          else
+            printf '%s\n\n%s\n' \
+              'Windows installer, built by GitHub Actions from this tag.' \
+              'This build is **not code-signed**. Windows names no publisher for it, and SmartScreen may hold the download. The SHA-256 is in the build log for this tag.' \
+              > "$RUNNER_TEMP/release-notes.md"
+            gh release create "$tag" --draft --title "$tag" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          gh release upload "$tag" "$INSTALLER" --clobber

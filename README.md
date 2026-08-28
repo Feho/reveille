@@ -19,8 +19,17 @@ offers only the ones the selected folder actually has, in the toolbar's **Game**
 cargo run -p reveille-app
 ```
 
-The development build is intentionally unpackaged and unsigned. Packaging, winget manifests,
-and Microsoft Store submission are shipping work outside v1.
+That runs the development build. A packaged Windows installer is built by
+[`.github/workflows/release.yml`](.github/workflows/release.yml): a `v*` tag produces an NSIS
+installer and attaches it to a draft release, and a manual run leaves the same installer as a
+workflow artifact. It installs for the current user, so it needs no Administrator, and it fetches
+the WebView2 runtime on machines that lack it.
+
+**Builds are not code-signed yet.** Windows names no publisher for them and SmartScreen may hold
+the download. The signing route is decided — SignPath Foundation's free certificate for open-source
+projects — but the application follows the first release rather than preceding it; `docs/plan.md`
+records why, and what the certificate does and does not change. winget manifests remain shipping
+work outside v1.
 
 ## Prove Journey B in one command
 

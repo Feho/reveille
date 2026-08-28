@@ -903,11 +903,94 @@ never listed — the master's list has never been the population, and until now 
 join anything outside it. And `check_server` merges its result into the same server list the sweep
 fills, so nothing downstream of it needed to learn about a second source of servers.
 
+## Windows packaging and signing (27 Aug 2026)
+
+**The installer is Tauri's own NSIS bundler, not Inno Setup.** The question was asked directly, and
+Inno loses on the two things that matter here. Tauri's Windows bundler already detects the WebView2
+Evergreen runtime and installs it when a machine lacks it; with Inno that is a script to write and
+maintain. And `bundle.windows.signCommand` is invoked by the bundler for *every* file it produces,
+which is the only way the app executable ends up signed as well as the installer wrapping it — Inno
+signs through a `SignTool` directive that wants a synchronous local signtool, and its generated
+`unins000.exe` is the piece most likely to ship unsigned by accident. winget is indifferent between
+them (`inno` and `nullsoft` are both first-class installer types with silent switches), so the
+channel already chosen gains nothing from the swap. What Inno would buy is wizard pages, Pascal
+scripting and install-UI control; Reveille installs one executable and a webview.
+
+Two installer decisions worth stating so they are not re-opened by accident:
+
+- **`installMode: currentUser`.** The app does not need Administrator to run, so the install should
+  not ask for it. Writing content into a game directory under `Program Files` or `C:\GOG Games` is a
+  separate question, and the probe-then-fall-back write-target policy already answers it at runtime
+  rather than by elevating the whole application.
+- **No licence page in the installer.** GPL-2.0 does not require acceptance in order to *use* the
+  program, and a page that must be clicked past is a step charged to every newcomer. The licence
+  ships in the repository and in the bundle metadata.
+- **`mainBinaryName: "Reveille"`.** Without it Tauri bundles the cargo artifact under its crate
+  name, so the installed program, its Start Menu target and its Task Manager row would all read
+  `reveille-app.exe`. Verified by building the bundle both ways.
+
+**`.github/workflows/release.yml` builds it.** A `v*` tag builds the installer and attaches it to a
+**draft** release, so publishing stays a deliberate act; a manual run builds the same installer and
+leaves it as a workflow artifact, so packaging can be exercised without minting a release. The
+installer's SHA-256 goes into the job summary, with the same honesty as the M5 note above: it is
+printed by the machine that built the file into a public log, which defends against a corrupted
+download or a bad CDN edge, not against a compromised account.
+
+**Correction to the M6 framing: "let the package manager carry the reputation rather than buying a
+certificate" was half right.** The half that holds is *rather than buying* — nothing here costs
+money. The half that does not: winget does not remove the unknown-publisher line from the UAC
+prompt, and anyone who takes the installer straight from GitHub Releases gets Mark of the Web and
+the full SmartScreen path regardless of what winget would have done. Signing and the package
+manager are complementary, not alternatives.
+
+**SignPath Foundation is the route to try** (checked 27 Aug 2026). It signs open-source projects for
+free from an HSM. The alternatives were re-checked and fail on availability rather than merit: Azure
+Artifact Signing (renamed from Trusted Signing in 2026) is $9.99/month and would carry the
+maintainer's own name, but individual sign-up is **US and Canada only** — the EU and UK are listed
+for organisations — so it is not open to this project's maintainer without incorporating. A
+conventional OV certificate has needed FIPS-grade hardware since the 2023 CA/Browser Forum change,
+which puts it above €300/year plus a token.
+
+What the Foundation costs instead of money, recorded because none of it is obvious:
+
+- **The publisher Windows shows is "SignPath Foundation", not Reveille and not the maintainer.** The
+  certificate is issued to the Foundation. The download page has to say so, in the same voice the
+  rest of the interface uses about what it does and does not know.
+- **It is not instant SmartScreen clearance.** Reputation accrues; Microsoft's own documentation
+  says so for OV signing generally. The genuine advantage is that the certificate is shared, so it
+  arrives carrying every other project's download history rather than starting at zero.
+- **Conditions that are work, not paperwork.** An OSI licence with no commercial dual-licensing and
+  no proprietary component (GPL-2.0-only qualifies); a **Code signing policy** section in the README
+  linking SignPath.io and the Foundation; documented Author / Reviewer / Approver roles; a privacy
+  statement; MFA on every account with commit access; and the project must **already be released in
+  the form to be signed**. That last one sets the order: ship v1 unsigned from the workflow above,
+  then apply.
+- **A reviewer risk to pre-empt.** Their prohibited list includes "unauthorized system
+  modifications", and Reveille writes pk3 files into a game directory outside its own install root.
+  It is user-initiated and the app is honest about the destination, but the download page must say
+  plainly that installing map content is the point, so a reviewer reads it as the feature.
+
+**Mechanism, so the wiring is not guessed at.** `SignPath/github-action-submit-signing-request`
+submits *one* artifact per step, which cannot be what `signCommand` calls — the bundler needs a
+command it can run per file. The per-file path is the `SignPath` PowerShell module:
+`Submit-SigningRequest -WaitForCompletion -OutputArtifactPath` blocks until the signed file comes
+back (600-second default timeout), and `-Origin` carries the repository and build metadata that
+GitHub Actions is trusted to assert. Note the interaction with the Foundation's per-release manual
+approval: each file is its own signing request, so a release is approved once per signed file — two,
+for the app executable and the installer — not once overall.
+
+**If signing lands, the Microsoft Store channel is no longer needed.** M6 kept the Store partly
+because submission signs the package for you. With SignPath doing that, the MSIX filesystem risk
+recorded above — pk3 writes into `C:\GOG Games\...\main\` being virtualised or refused inside a
+packaged app — need not be taken at all. winget plus a signed publisher-hosted installer carries no
+such constraint.
+
 ## Decisions still open
 
 Maintainer model. The moh-db relationship: worth telling them, and worth asking for published
-digests and a `gameType` filter that filters. Distribution and signing are decided above; winget
-manifests and any Microsoft Store submission remain owner-run shipping work, outside v1.
+digests and a `gameType` filter that filters. Distribution, packaging and the signing route are
+decided above; the SignPath application itself, the winget manifest, and any Microsoft Store
+submission remain owner-run shipping work, outside v1.
 
 ## Follow-up, not blocking
 

@@ -35,6 +35,24 @@ changes too often to encode in a heading.
 
 ## Stage 1 — Getting a working client
 
+### F11 · Windows warns about Reveille before it ever runs
+
+**Where** The download, and the first run of the installer. Before setup — this is the step ahead
+of F1.
+**Who it stops** Unknown. Everyone cautious enough to stop at "Windows protected your PC", which
+for a launcher aimed at people who have not played since 2002 is not a small share.
+**Evidence** *Assumed.* Nothing has been measured, because nothing has been distributed. What is
+established is the mechanism: a download from GitHub Releases carries Mark of the Web, an unsigned
+installer names no publisher in the UAC prompt, and SmartScreen reputation accrues per signing
+certificate — so an unsigned build starts at zero and stays there.
+**What Reveille does** Nothing yet. The installer is per-user, so at least it raises no
+Administrator prompt on top of the warning, and the release notes and README say plainly that the
+build is unsigned rather than letting the warning be a surprise.
+**Status** Open. Packaging shipped 27 Aug 2026; signing is decided (SignPath Foundation) and not
+yet applied for, which is deliberate — their conditions require the project to be released in the
+form to be signed. See `plan.md`, *Windows packaging and signing*. **This entry should stop being
+Assumed:** the first release makes it cheaply Observed.
+
 ### F1 · The player cannot tell Reveille where the game is
 
 **Where** Setup, first run.

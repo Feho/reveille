@@ -3,5 +3,4 @@
 /target/
 **/node_modules/
 crates/reveille-app/gen/
-crates/reveille-app/icons/
 *.log
