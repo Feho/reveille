@@ -40,6 +40,15 @@ installed release can accept future updates only from that key. To reproduce the
 installer and signature locally, run `just bundle-updater path/to/reveille.key`; leave the signing
 prompt empty for a key created without a password.
 
+Prepare a release version without updating Cargo, Tauri and npm independently:
+
+```console
+just bump-version 0.1.2
+```
+
+The recipe refuses an invalid or non-increasing semantic version and stops if the existing release
+identities already disagree. Add `--dry-run` to validate the change without writing it.
+
 **Builds are not code-signed yet.** Windows names no publisher for them and SmartScreen may hold
 the download. The signing route is decided — SignPath Foundation's free certificate for open-source
 projects — but the application follows the first release rather than preceding it; `docs/plan.md`

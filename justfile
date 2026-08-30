@@ -120,6 +120,10 @@ updater-key-generate KEY:
 bundle-updater KEY:
     node tools/build-updater.mjs "{{ KEY }}"
 
+# Update Cargo, Tauri and npm release identities together; VERSION must be newer SemVer.
+bump-version VERSION *ARGS:
+    node tools/bump-version.mjs "{{ VERSION }}" {{ ARGS }}
+
 # The headless pipeline. `just cli --help` lists the subcommands.
 cli *ARGS:
     cargo run -p reveille-cli -- {{ ARGS }}
