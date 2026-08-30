@@ -25,6 +25,21 @@ installer and attaches it to a draft release, and a manual run leaves the same i
 workflow artifact. It installs for the current user, so it needs no Administrator, and it fetches
 the WebView2 runtime on machines that lack it.
 
+Published releases are also offered inside installed copies of Reveille. The updater uses Tauri's
+mandatory release signatures, shows **Update and restart** and **Later**, and never installs from a
+background check alone. Before building a release, generate the updater key once:
+
+```console
+just updater-key-generate path/to/reveille.key
+```
+
+Store the private key as the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`, its password (when
+set) as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and the generated public key as the repository
+variable `REVEILLE_UPDATER_PUBKEY`. Keep the private key outside the repository and backed up: an
+installed release can accept future updates only from that key. To reproduce the signed updater
+installer and signature locally, run `just bundle-updater path/to/reveille.key`; leave the signing
+prompt empty for a key created without a password.
+
 **Builds are not code-signed yet.** Windows names no publisher for them and SmartScreen may hold
 the download. The signing route is decided — SignPath Foundation's free certificate for open-source
 projects — but the application follows the first release rather than preceding it; `docs/plan.md`

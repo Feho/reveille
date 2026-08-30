@@ -15,6 +15,9 @@
       <header class="titlebar">
         <span class="wordmark">Reveille</span>
         <span class="titlebar__spacer"></span>
+        <button type="button" id="reveille-update-btn" class="btn btn--sm btn--primary hidden">
+          Update Reveille
+        </button>
         <button type="button" id="glossary-btn" class="btn btn--sm btn--ghost">
           What these words mean
         </button>
@@ -49,6 +52,32 @@
       <div class="dialog__body" id="info-dialog-body"></div>
       <div class="dialog__foot">
         <button type="button" class="btn" id="info-dialog-close" autofocus>Close</button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="reveille-update-dialog"
+      aria-labelledby="reveille-update-title"
+      aria-describedby="reveille-update-copy"
+    >
+      <div class="dialog__head">
+        <h2 class="display heading-sm" id="reveille-update-title">Update Reveille</h2>
+      </div>
+      <div class="dialog__body">
+        <p id="reveille-update-copy"></p>
+        <p class="quiet">Reveille checks the update before installing it. The app will close and reopen.</p>
+        <div id="reveille-update-progress" class="stack--tight hidden" role="status" aria-live="polite">
+          <div id="reveille-update-meter" class="meter meter--indeterminate">
+            <span id="reveille-update-meter-fill" class="meter__fill"></span>
+          </div>
+          <span id="reveille-update-status" class="quiet data"></span>
+        </div>
+        <p id="reveille-update-error" class="error hidden" role="alert"></p>
+      </div>
+      <div class="dialog__foot">
+        <button type="button" class="btn btn--ghost hidden" id="reveille-update-stop">Stop download</button>
+        <button type="button" class="btn" id="reveille-update-later">Later</button>
+        <button type="button" class="btn btn--primary" id="reveille-update-install">Update and restart</button>
       </div>
     </dialog>
 

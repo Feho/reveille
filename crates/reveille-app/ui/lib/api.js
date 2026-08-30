@@ -20,6 +20,9 @@
 //   check_server(session, address, queryPort)  -> CheckResult
 //   preview_join(session, address)             -> JoinPreview
 //   install_and_launch(session, address, selectedCandidateIds, acceptIncomplete) -> JoinResult
+//   check_reveille_update()                    -> { version, current_version } | null
+//   install_reveille_update()                  -> void (the app exits on Windows)
+//   cancel_reveille_update()                   -> void
 //
 // A `session` is `{ path, engine, game }`: which game folder, which engine program, and which of
 // the three games — Allied Assault, Spearhead or Breakthrough. Every server-facing command takes
@@ -30,6 +33,7 @@
 //   reveille://preview  PreviewProgress  { address, index, of, map }
 //   reveille://install  InstallProgress  { map, filename, index, of, phase, ... }
 //   reveille://openmohaa-install OpenMohaaInstallProgress { received, total }
+//   reveille://self-update SelfUpdateProgress { phase, received?, total? }
 
 const tauri = window.__TAURI__;
 const invoke = tauri.core.invoke;
@@ -50,6 +54,10 @@ export const installOpenMohaa = (path, offerId) =>
   invoke("install_openmohaa", { path, offerId });
 
 export const cancelOpenMohaaInstall = () => invoke("cancel_openmohaa_install");
+
+export const checkReveilleUpdate = () => invoke("check_reveille_update");
+export const installReveilleUpdate = () => invoke("install_reveille_update");
+export const cancelReveilleUpdate = () => invoke("cancel_reveille_update");
 
 export const pickInstallFolder = () => invoke("pick_install_folder");
 
@@ -76,6 +84,7 @@ export const onInstallProgress = (handler) => on("reveille://install", handler);
 export const onOpenMohaaInstallProgress = (handler) =>
   on("reveille://openmohaa-install", handler);
 export const onRebornInstallProgress = (handler) => on("reveille://reborn-install", handler);
+export const onSelfUpdateProgress = (handler) => on("reveille://self-update", handler);
 
 function on(name, handler) {
   return listen(name, (event) => handler(event.payload));

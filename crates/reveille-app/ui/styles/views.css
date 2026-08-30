@@ -807,6 +807,7 @@
    help control keeps one relative position across both views (WCAG 2.2 SC 3.2.6). */
 .setup__foot {
   display: flex;
+  gap: var(--space-2);
   justify-content: center;
   padding-top: var(--space-2);
 }

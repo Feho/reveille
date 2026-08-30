@@ -241,6 +241,18 @@ thing, for the same reason. Test:
 and `servers.js`, for the same reason as the ones under H12: the shell has no test runner and the
 failure would be silent.
 
+### H16 · Never offer the installed or an older Reveille release as an update
+**Because** A GitHub release title or installer filename is not version evidence. Re-offering the
+installed version would turn every launch into a permanent update prompt, and offering an older
+one would silently turn update into rollback.
+**Enforced at** `reveille-app/src/self_update.rs` delegates semantic-version comparison of the
+latest published manifest to Tauri's updater. The pending update is the exact checked offer,
+retained in Rust rather than reconstructed from frontend fields. `ui/app.js` exposes **Update
+Reveille** only when that check returns a newer version, and installation starts only from the
+player's **Update and restart** action. Payload authenticity is the separate, stronger install
+gate in S6: the release label is not what the updater signature covers. Test:
+`reveille-app::the_self_update_offer_is_explicit_and_keeps_the_checked_release`.
+
 ---
 
 ## S — Safety: what Reveille may do to a machine or a server
@@ -284,6 +296,18 @@ executable to `.reveille-engines/original/` with no-clobber semantics, then reco
 `.reveille-engines/state.json`. A later install or activation never replaces that backup. Any
 partial activation restores all canonical files. Tests cover first install, reinstall, switching
 both directions, externally changed files, and rollback.
+
+### S6 · Never replace Reveille from an unsigned release or without the player's choice
+**Because** A self-update replaces the program currently making trust decisions on the player's
+behalf. A background network response is not consent, and transport security alone does not bind
+downloaded bytes to the release key embedded in the installed app.
+**Enforced at** release builds require Tauri's private updater key and publish its detached
+signature inside `latest.json`; the app is compiled with the corresponding public key. Tauri
+refuses an invalid signature before `Update::install`, and Windows exits the running app before
+NSIS replaces it. `install_reveille_update` is reachable only through the visible **Update and
+restart** button; **Later** closes the offer without installing. The download can be stopped before
+the verified apply phase. Test:
+`reveille-app::the_self_update_offer_is_explicit_and_keeps_the_checked_release`.
 
 ---
 

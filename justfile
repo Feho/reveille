@@ -112,6 +112,14 @@ app-release:
 bundle:
     cd crates/reveille-app && npm run tauri build
 
+# Generate the updater key once; an empty password is valid, and the private key needs backup.
+updater-key-generate KEY:
+    cd crates/reveille-app && npm run tauri signer generate -- -w "{{ KEY }}"
+
+# Build signed updater artifacts from KEY and its `.pub` sibling; set the password env var if used.
+bundle-updater KEY:
+    node tools/build-updater.mjs "{{ KEY }}"
+
 # The headless pipeline. `just cli --help` lists the subcommands.
 cli *ARGS:
     cargo run -p reveille-cli -- {{ ARGS }}

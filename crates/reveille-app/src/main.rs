@@ -5,6 +5,8 @@
 //! Tauri shell. This layer owns presentation policy: it turns the pipeline's typed results into
 //! payloads and progress events, and decides nothing the core has not already established.
 
+mod self_update;
+
 use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::io::{self, Read as _};
@@ -1739,8 +1741,14 @@ async fn install_candidate(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .pubkey(self_update::PUBLIC_KEY)
+                .build(),
+        )
         .setup(|app| {
             app.manage(AppState::default());
+            self_update::register(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1757,7 +1765,10 @@ fn main() {
             browse_servers,
             check_server,
             preview_join,
-            install_and_launch
+            install_and_launch,
+            self_update::check_reveille_update,
+            self_update::install_reveille_update,
+            self_update::cancel_reveille_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running Reveille");
@@ -2513,5 +2524,32 @@ mod tests {
                 "ui/views/join.js: the map rotation listing must not come back ({gone})"
             );
         }
+    }
+
+    #[test]
+    fn the_self_update_offer_is_explicit_and_keeps_the_checked_release() {
+        // A background response may reveal an offer, but only the player's labelled action may
+        // install it. The Rust side retains Tauri's checked Update object so the frontend cannot
+        // swap its URL or signature between those two moments (rules H16 and S6).
+        let updater = include_str!("self_update.rs");
+        let shell = include_str!("../ui/app.js");
+        let setup = include_str!("../ui/views/setup.js");
+        let workflow = include_str!("../../../.github/workflows/release.yml");
+        let config = include_str!("../tauri.conf.json");
+
+        assert!(updater.contains("pending: Mutex<Option<Update>>"));
+        assert!(updater.contains("let update = state"));
+        assert!(updater.contains("update.install(bytes)?;"));
+        assert!(shell.contains("await checkReveilleUpdate()"));
+        assert!(shell.contains("await installReveilleUpdate()"));
+        assert!(shell.contains("if (!state.selfUpdate.running)"));
+        assert!(shell.contains("setup.renderUpdateOffer()"));
+        assert!(!shell.contains("if (!state.install) setup.render();"));
+        assert!(setup.contains("data-self-update-offer"));
+        assert!(setup.contains("Update Reveille"));
+        assert!(workflow.contains("REVEILLE_UPDATER_PUBKEY"));
+        assert!(workflow.contains("createUpdaterArtifacts = $true"));
+        assert!(workflow.contains("latest.json"));
+        assert!(config.contains(r#""pubkey": """#));
     }
 }

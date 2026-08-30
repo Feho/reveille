@@ -20,6 +20,9 @@ export const GAME_LABELS = {
 };
 
 export const state = {
+  /** A newer signed Reveille release retained by the Rust updater, when one was found. */
+  selfUpdate: { offer: null, running: false, stopping: false, progress: null, error: null },
+
   /** The identified installation, or null while first run is unresolved. */
   install: null,
   /** Explicit engine choice for this installation. */

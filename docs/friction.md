@@ -53,6 +53,21 @@ yet applied for, which is deliberate — their conditions require the project to
 form to be signed. See `plan.md`, *Windows packaging and signing*. **This entry should stop being
 Assumed:** the first release makes it cheaply Observed.
 
+### F12 · An installed Reveille never learns that a fix was published
+
+**Where** Every launch after the first release.
+**Who it stops** Anyone whose problem was fixed in a newer build but who does not revisit the
+GitHub release page on their own.
+**Evidence** *Observed, 28 Aug 2026.* Requested directly by the project owner. No player frequency
+has been measured yet.
+**What Reveille does** Checks GitHub's latest published release in the background. When its
+published semantic version is newer, Reveille offers **Update Reveille** with **Update and restart** and
+**Later** choices. A failed check does not interrupt setup or browsing; the download is cancellable,
+and no bytes are installed until Tauri verifies the release signature embedded by the release
+workflow.
+**Status** Shipped. The owner must create the updater key once and store its private half in GitHub
+Actions before the next release; the public half is compiled into release builds.
+
 ### F1 · The player cannot tell Reveille where the game is
 
 **Where** Setup, first run.

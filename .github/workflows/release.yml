@@ -16,6 +16,12 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      # The private half never enters the repository or an artifact. The public half is compiled
+      # into Reveille so an installed copy can reject a manifest signed by any other key.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      REVEILLE_UPDATER_PUBKEY: ${{ vars.REVEILLE_UPDATER_PUBKEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -32,6 +38,26 @@ jobs:
         working-directory: crates/reveille-app
         run: npm ci
 
+      - name: Check release identity and updater key
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ] || [ -z "${REVEILLE_UPDATER_PUBKEY:-}" ]; then
+            echo 'TAURI_SIGNING_PRIVATE_KEY and REVEILLE_UPDATER_PUBKEY must be configured before packaging' >&2
+            exit 1
+          fi
+          cargo_version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "reveille-app") | .version')
+          tauri_version=$(jq -r .version crates/reveille-app/tauri.conf.json)
+          npm_version=$(jq -r .version crates/reveille-app/package.json)
+          if [ "$cargo_version" != "$tauri_version" ] || [ "$cargo_version" != "$npm_version" ]; then
+            echo "release versions disagree: Cargo=$cargo_version Tauri=$tauri_version npm=$npm_version" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]] && [ "${GITHUB_REF_NAME#v}" != "$cargo_version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match application version $cargo_version" >&2
+            exit 1
+          fi
+
       # The NSIS bundler installs the WebView2 Evergreen runtime when the machine lacks it, and
       # installs per user, so nothing here needs Administrator. Writing content into a game
       # directory is a separate question the app answers at runtime.
@@ -41,7 +67,18 @@ jobs:
       # inside the installer gets signed as well as the installer itself.
       - name: Build the NSIS installer
         working-directory: crates/reveille-app
-        run: npx -- tauri build -- --locked
+        shell: pwsh
+        run: |
+          # The public updater key is shareable, but it is release identity rather than source.
+          # Merge it only for packaging; Rust receives the same value through option_env!.
+          $updaterConfig = @{
+            bundle = @{ createUpdaterArtifacts = $true }
+            plugins = @{ updater = @{ pubkey = $env:REVEILLE_UPDATER_PUBKEY } }
+          } | ConvertTo-Json -Compress -Depth 4
+          $updaterConfigPath = Join-Path $env:RUNNER_TEMP 'reveille-updater-config.json'
+          Set-Content -LiteralPath $updaterConfigPath -Value $updaterConfig -Encoding utf8
+          npx -- tauri build --config $updaterConfigPath -- --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Record the installer's SHA-256
         id: installer
@@ -57,8 +94,14 @@ jobs:
             exit 1
           fi
           path="${installers[0]}"
+          signature="$path.sig"
+          if [ ! -f "$signature" ]; then
+            echo "updater signature was not generated for $path" >&2
+            exit 1
+          fi
           digest=$(sha256sum "$path" | cut -d' ' -f1)
           echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "signature=$signature" >> "$GITHUB_OUTPUT"
           # Printed by the machine that built the file, into a public log. Be honest about what
           # that buys: it defends against a corrupted download or a bad CDN edge, not against a
           # compromised account, because it travels from the same origin as the download.
@@ -73,7 +116,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: reveille-windows-installer
-          path: target/release/bundle/nsis/*-setup.exe
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/*-setup.exe.sig
           if-no-files-found: error
 
       - name: Attach the installer to a draft release
@@ -81,10 +126,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           INSTALLER: ${{ steps.installer.outputs.path }}
+          SIGNATURE: ${{ steps.installer.outputs.signature }}
         shell: bash
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
+          notes='Windows installer, built by GitHub Actions from this tag.'
           if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
             if [ "$draft" != "true" ]; then
               echo "refusing to replace an installer on published release $tag" >&2
@@ -92,10 +139,21 @@ jobs:
             fi
           else
             printf '%s\n\n%s\n' \
-              'Windows installer, built by GitHub Actions from this tag.' \
+              "$notes" \
               'This build is **not code-signed**. Windows names no publisher for it, and SmartScreen may hold the download. The SHA-256 is in the build log for this tag.' \
               > "$RUNNER_TEMP/release-notes.md"
             gh release create "$tag" --draft --title "$tag" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
-          gh release upload "$tag" "$INSTALLER" --clobber
+          filename=$(basename "$INSTALLER")
+          version="${tag#v}"
+          signature=$(<"$SIGNATURE")
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$filename"
+          jq -n \
+            --arg version "$version" \
+            --arg notes "$notes" \
+            --arg url "$url" \
+            --arg signature "$signature" \
+            '{version: $version, notes: $notes, platforms: {"windows-x86_64": {url: $url, signature: $signature}}}' \
+            > "$RUNNER_TEMP/latest.json"
+          gh release upload "$tag" "$INSTALLER" "$RUNNER_TEMP/latest.json" --clobber

@@ -936,6 +936,24 @@ installer's SHA-256 goes into the job summary, with the same honesty as the M5 n
 printed by the machine that built the file into a public log, which defends against a corrupted
 download or a bad CDN edge, not against a compromised account.
 
+**Self-update, added 28 Aug 2026.** Release builds also produce Tauri's signed updater artifact and
+a static `latest.json` beside the installer. The app checks GitHub's
+`releases/latest/download/latest.json` endpoint in the background, so a draft is invisible and the
+offer begins only when the owner publishes it. Tauri compares semantic versions and requires a
+minisign signature; this is stronger evidence than the same-origin GitHub asset digest used for
+OpenMoHAA. The exact checked offer stays in Rust until the player chooses **Update and restart**.
+The transfer is cancellable; the verified apply is not, and on Windows the updater exits Reveille
+before NSIS replaces it. A failed check is silent because it is a recorded non-result unrelated to
+the player's current setup or server pass.
+
+The signing key is shipping state, not repository state. Generate it once with Tauri's signer,
+store the private key and optional password as GitHub Actions secrets
+`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and store the shareable public
+key as the repository variable `REVEILLE_UPDATER_PUBKEY`. The release workflow refuses to build
+without both halves rather than publishing a version existing installations can never verify. It
+also requires the `v*` tag, Cargo package, Tauri config and npm package versions to agree; otherwise
+a binary could install successfully and immediately offer the same release again.
+
 **Correction to the M6 framing: "let the package manager carry the reputation rather than buying a
 certificate" was half right.** The half that holds is *rather than buying* — nothing here costs
 money. The half that does not: winget does not remove the unknown-publisher line from the UAC

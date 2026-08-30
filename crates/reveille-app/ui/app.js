@@ -12,12 +12,16 @@ import {
   browseFailure,
   browseServers,
   cancelBrowse,
+  cancelReveilleUpdate,
+  checkReveilleUpdate,
   checkServer,
   errorText,
   installAndLaunch,
+  installReveilleUpdate,
   onBrowseProgress,
   onInstallProgress,
   onPreviewProgress,
+  onSelfUpdateProgress,
   previewJoin,
 } from "./lib/api.js";
 import { favourites, recordLaunch, toggleFavourite } from "./lib/bookmarks.js";
@@ -56,7 +60,7 @@ const servers = serversView({
   onGame: selectGame,
 });
 const join = joinView($("#detail-slot"), { onJoin: getAndJoin, onRecheck: recheck });
-const setup = setupView(setupRoot, { onReady: enterServers });
+const setup = setupView(setupRoot, { onReady: enterServers, onUpdate: openReveilleUpdate });
 
 $("#toolbar-slot").replaceWith(servers.toolbar);
 $("#list-slot").replaceWith(servers.listPane);
@@ -64,8 +68,16 @@ $("#status-slot").replaceWith(servers.statusbar);
 document.body.append(servers.live);
 
 $("#install-chip").addEventListener("click", leaveServers);
+$("#reveille-update-btn").addEventListener("click", openReveilleUpdate);
 $("#glossary-btn").addEventListener("click", openGlossary);
 $("#info-dialog-close").addEventListener("click", closeDialog);
+$("#reveille-update-later").addEventListener("click", dismissReveilleUpdate);
+$("#reveille-update-install").addEventListener("click", startReveilleUpdate);
+$("#reveille-update-stop").addEventListener("click", stopReveilleUpdate);
+$("#reveille-update-dialog").addEventListener("cancel", (event) => {
+  if (state.selfUpdate.running) event.preventDefault();
+});
+void onSelfUpdateProgress(receiveReveilleUpdateProgress);
 
 subscribe(render);
 
@@ -78,8 +90,112 @@ function render() {
   $("#install-chip-path").textContent = displayPath(state.install.root);
   $("#install-chip-engine").textContent =
     `${GAME_LABELS[state.game] ?? state.game} · ${engineLabel(state.engine)}`;
+  $("#reveille-update-btn").classList.toggle("hidden", !state.selfUpdate.offer);
+  $("#reveille-update-btn").disabled = state.browse.running || state.joining;
   servers.render();
   join.render();
+}
+
+/* Reveille updates --------------------------------------------------------- */
+
+/** A failed background check is unrelated to the player's current task and stays non-blocking. */
+async function findReveilleUpdate() {
+  try {
+    const offer = await checkReveilleUpdate();
+    if (!offer) return;
+    update((next) => (next.selfUpdate.offer = offer));
+    if (!state.install) setup.renderUpdateOffer();
+  } catch {
+    // The next launch asks again. Setup and server browsing continue with no invented diagnosis.
+  }
+}
+
+function openReveilleUpdate() {
+  if (!state.selfUpdate.offer || state.browse.running || state.joining) return;
+  renderReveilleUpdate();
+  $("#reveille-update-dialog").showModal();
+}
+
+function dismissReveilleUpdate() {
+  if (!state.selfUpdate.running) $("#reveille-update-dialog").close();
+}
+
+async function startReveilleUpdate() {
+  if (state.selfUpdate.running || !state.selfUpdate.offer) return;
+  state.selfUpdate.running = true;
+  state.selfUpdate.stopping = false;
+  state.selfUpdate.progress = { phase: "downloading", received: 0, total: null };
+  state.selfUpdate.error = null;
+  renderReveilleUpdate();
+  try {
+    await installReveilleUpdate();
+  } catch (error) {
+    const stopped = state.selfUpdate.stopping;
+    state.selfUpdate.running = false;
+    state.selfUpdate.stopping = false;
+    if (stopped) state.selfUpdate.progress = { phase: "cancelled" };
+    else if (state.selfUpdate.progress?.phase !== "cancelled") state.selfUpdate.error = errorText(error);
+    renderReveilleUpdate();
+  }
+}
+
+async function stopReveilleUpdate() {
+  const progress = state.selfUpdate.progress;
+  if (!state.selfUpdate.running || progress?.phase !== "downloading") return;
+  state.selfUpdate.stopping = true;
+  renderReveilleUpdate();
+  try {
+    await cancelReveilleUpdate();
+  } catch (error) {
+    state.selfUpdate.stopping = false;
+    state.selfUpdate.error = errorText(error);
+    renderReveilleUpdate();
+  }
+}
+
+function receiveReveilleUpdateProgress(progress) {
+  state.selfUpdate.progress = progress;
+  if (progress.phase === "cancelled") {
+    state.selfUpdate.running = false;
+    state.selfUpdate.stopping = false;
+  }
+  renderReveilleUpdate();
+}
+
+function renderReveilleUpdate() {
+  const offer = state.selfUpdate.offer;
+  if (!offer) return;
+  const progress = state.selfUpdate.progress;
+  const running = state.selfUpdate.running;
+  $("#reveille-update-copy").textContent =
+    `Version ${offer.version} is available. You have ${offer.current_version}.`;
+  $("#reveille-update-install").disabled = running;
+  $("#reveille-update-later").disabled = running;
+  const canStop = running && progress?.phase === "downloading";
+  $("#reveille-update-stop").classList.toggle("hidden", !canStop);
+  $("#reveille-update-stop").disabled = state.selfUpdate.stopping;
+  $("#reveille-update-stop").textContent = state.selfUpdate.stopping ? "Stopping…" : "Stop download";
+
+  const progressBox = $("#reveille-update-progress");
+  progressBox.classList.toggle("hidden", !progress);
+  const total = progress?.total ?? null;
+  const received = progress?.received ?? 0;
+  const determinate = progress?.phase === "downloading" && total;
+  $("#reveille-update-meter").classList.toggle("meter--indeterminate", !determinate);
+  $("#reveille-update-meter-fill").style.width = determinate
+    ? `${Math.min(100, (received / total) * 100)}%`
+    : "";
+  $("#reveille-update-status").textContent = reveilleUpdateStatus(progress, received, total);
+  $("#reveille-update-error").textContent = state.selfUpdate.error ?? "";
+  $("#reveille-update-error").classList.toggle("hidden", !state.selfUpdate.error);
+}
+
+function reveilleUpdateStatus(progress, received, total) {
+  if (!progress) return "";
+  if (progress.phase === "verifying") return "Checking the downloaded update";
+  if (progress.phase === "installing") return "Closing Reveille and installing the update";
+  if (progress.phase === "cancelled") return "Download stopped";
+  return total ? `${Math.round((received / total) * 100)}% downloaded` : "Downloading update";
 }
 
 /* First run ---------------------------------------------------------------- */
@@ -664,6 +780,7 @@ document.addEventListener("keydown", (event) => {
 
 notify();
 autoDetect(setup.render, enterServers);
+void findReveilleUpdate();
 
 function engineLabel(engine) {
   if (engine === "openmohaa") return "OpenMoHAA";
