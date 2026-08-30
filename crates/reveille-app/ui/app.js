@@ -91,7 +91,7 @@ function render() {
   $("#install-chip-engine").textContent =
     `${GAME_LABELS[state.game] ?? state.game} · ${engineLabel(state.engine)}`;
   $("#reveille-update-btn").classList.toggle("hidden", !state.selfUpdate.offer);
-  $("#reveille-update-btn").disabled = state.browse.running || state.joining;
+  $("#reveille-update-btn").disabled = state.joining;
   servers.render();
   join.render();
 }
@@ -111,7 +111,7 @@ async function findReveilleUpdate() {
 }
 
 function openReveilleUpdate() {
-  if (!state.selfUpdate.offer || state.browse.running || state.joining) return;
+  if (!state.selfUpdate.offer || state.joining) return;
   renderReveilleUpdate();
   $("#reveille-update-dialog").showModal();
 }

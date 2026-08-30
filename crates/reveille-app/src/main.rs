@@ -2545,6 +2545,9 @@ mod tests {
         assert!(shell.contains("if (!state.selfUpdate.running)"));
         assert!(shell.contains("setup.renderUpdateOffer()"));
         assert!(!shell.contains("if (!state.install) setup.render();"));
+        assert!(shell.contains("if (!state.selfUpdate.offer || state.joining) return;"));
+        assert!(shell.contains(r##"$("#reveille-update-btn").disabled = state.joining;"##));
+        assert!(!shell.contains(r##"$("#reveille-update-btn").disabled = state.browse.running"##));
         assert!(setup.contains("data-self-update-offer"));
         assert!(setup.contains("Update Reveille"));
         assert!(workflow.contains("REVEILLE_UPDATER_PUBKEY"));
