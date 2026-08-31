@@ -7,7 +7,6 @@ import {
   openMohaaStatus, pickInstallFolder, selectEngine,
 } from "../lib/api.js";
 import { bytes, displayPath } from "../lib/format.js";
-import { glossaryButton } from "../lib/glossary.js";
 import {
   GAME_LABELS, defaultGame, notify, playableGames, recallEngine, rememberEngine, rememberGame,
   rememberInstall, state,
@@ -61,8 +60,7 @@ function card(render, onReady, onUpdate) {
       el("button", { className: "btn btn--ghost", disabled: view.busy || Boolean(view.installing), onclick: () => { resetCandidate(); view.message = "Pick your game folder."; render(); } }, "Choose another folder")),
     view.error && el("p", { className: "error", role: "alert" }, view.error),
     el("div", { className: "setup__foot" },
-      el("button", { type: "button", className: `btn btn--sm btn--primary ${state.selfUpdate.offer ? "" : "hidden"}`, "data-self-update-offer": true, disabled: Boolean(view.installing), onclick: onUpdate }, "Update Reveille"),
-      glossaryButton()),
+      el("button", { type: "button", className: `btn btn--sm btn--primary ${state.selfUpdate.offer ? "" : "hidden"}`, "data-self-update-offer": true, disabled: Boolean(view.installing), onclick: onUpdate }, "Update Reveille")),
   ));
 }
 

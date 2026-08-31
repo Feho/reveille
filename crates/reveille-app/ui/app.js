@@ -6,7 +6,6 @@
 
 import { $ } from "./lib/dom.js";
 import { closeDialog, openDialog } from "./lib/dialog.js";
-import { openGlossary } from "./lib/glossary.js";
 import { closeMenu, menuIsOpen } from "./lib/menu.js";
 import {
   browseFailure,
@@ -69,7 +68,6 @@ document.body.append(servers.live);
 
 $("#install-chip").addEventListener("click", leaveServers);
 $("#reveille-update-btn").addEventListener("click", openReveilleUpdate);
-$("#glossary-btn").addEventListener("click", openGlossary);
 $("#info-dialog-close").addEventListener("click", closeDialog);
 $("#reveille-update-later").addEventListener("click", dismissReveilleUpdate);
 $("#reveille-update-install").addEventListener("click", startReveilleUpdate);
