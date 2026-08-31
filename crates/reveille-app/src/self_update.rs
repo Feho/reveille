@@ -18,7 +18,8 @@ pub const PUBLIC_KEY: &str = match option_env!("REVEILLE_UPDATER_PUBKEY") {
     None => "",
 };
 
-const ENDPOINT: &str = "https://github.com/Feho/reveille/releases/latest/download/latest.json";
+const ENDPOINT: &str =
+    "https://github.com/MOHCentral/reveille/releases/latest/download/latest.json";
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_EVENT_STRIDE: u64 = 256 * 1024;
 
