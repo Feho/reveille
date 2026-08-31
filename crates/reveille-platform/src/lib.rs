@@ -115,6 +115,24 @@ pub fn detect_client(install_root: &Path) -> ClientKind {
     }
 }
 
+/// Build the process-listing command, suppressing the console window it would otherwise flash.
+///
+/// `tasklist` is a console program, so a GUI front end spawning it inherits no console and
+/// Windows creates one — a black window that blinks on screen for the length of the query.
+/// `CREATE_NO_WINDOW` = `0x0800_0000`; learn.microsoft.com/windows/win32/procthread/process-creation-flags
+#[cfg(windows)]
+fn tasklist_command() -> Command {
+    use std::os::windows::process::CommandExt as _;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let mut command = Command::new("tasklist");
+    command
+        .args(["/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
 /// Conservatively report whether a Windows `OpenMoHAA` installation can be replaced.
 ///
 /// A failed or unavailable process query is `Unknown`, never evidence that the client stopped.
@@ -127,10 +145,7 @@ pub fn openmohaa_activity() -> OpenMohaaActivity {
         // `IMAGENAME eq` filter per name, because `/FI` filters combine with AND and cannot
         // express "any of these images". Matching on image name alone is deliberately
         // conservative: tasklist cannot prove which installation launched a process.
-        let Ok(output) = Command::new("tasklist")
-            .args(["/FO", "CSV", "/NH"])
-            .output()
-        else {
+        let Ok(output) = tasklist_command().output() else {
             return OpenMohaaActivity::unknown();
         };
         if !output.status.success() {

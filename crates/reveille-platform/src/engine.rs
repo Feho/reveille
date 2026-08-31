@@ -6,8 +6,6 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
-#[cfg(windows)]
-use std::process::Command;
 
 use reveille_core::engine::EngineChoice;
 use reveille_core::platform::package::{self as package_io, OverlayFile};
@@ -84,10 +82,7 @@ struct RebornReceipt {
 pub fn retail_activity() -> EngineActivity {
     #[cfg(windows)]
     {
-        let Ok(output) = Command::new("tasklist")
-            .args(["/FO", "CSV", "/NH"])
-            .output()
-        else {
+        let Ok(output) = crate::tasklist_command().output() else {
             return EngineActivity::Unknown;
         };
         if !output.status.success() {
