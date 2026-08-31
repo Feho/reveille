@@ -32,14 +32,16 @@ const HISTORY_LIMIT = 50;
 function read() {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    if (!saved || saved.v !== VERSION) return { favourites: [], history: [] };
+    if (!saved || saved.v !== VERSION) return { favorites: [], history: [] };
     return {
-      favourites: (saved.favourites ?? []).map(entry).filter(Boolean),
+      // `favourites` is the pre-rename field. Read so an existing player's starred list survives
+      // the rename; the next write replaces the whole blob under the new name.
+      favorites: (saved.favorites ?? saved.favourites ?? []).map(entry).filter(Boolean),
       history: (saved.history ?? []).map(entry).filter(Boolean),
     };
   } catch {
     // A corrupt or unreadable store is treated as empty rather than refusing to start.
-    return { favourites: [], history: [] };
+    return { favorites: [], history: [] };
   }
 }
 
@@ -78,11 +80,11 @@ function identify(row) {
   };
 }
 
-/* Favourites ---------------------------------------------------------------- */
+/* Favorites ---------------------------------------------------------------- */
 
 /** Starred servers, most recently added first. */
-export function favourites() {
-  return read().favourites;
+export function favorites() {
+  return read().favorites;
 }
 
 /**
@@ -91,31 +93,31 @@ export function favourites() {
  * The table asks about every row on every repaint, and a per-row read would parse the store a
  * hundred-odd times a paint.
  */
-export function favouriteAddresses() {
-  return new Set(read().favourites.map((saved) => saved.address));
+export function favoriteAddresses() {
+  return new Set(read().favorites.map((saved) => saved.address));
 }
 
-export function isFavourite(address) {
-  return read().favourites.some((saved) => saved.address === address);
+export function isFavorite(address) {
+  return read().favorites.some((saved) => saved.address === address);
 }
 
 /**
  * Star or unstar a server. Returns the new state.
  *
- * Takes either a live row or a remembered entry, because a favourite can be unstarred from a
+ * Takes either a live row or a remembered entry, because a favorite can be unstarred from a
  * row the current sweep did not return.
  */
-export function toggleFavourite(subject) {
+export function toggleFavorite(subject) {
   const identity = subject.server ? identify(subject) : entry(subject);
   if (!identity) return false;
   const store = read();
-  const found = store.favourites.findIndex((saved) => saved.address === identity.address);
+  const found = store.favorites.findIndex((saved) => saved.address === identity.address);
   if (found !== -1) {
-    store.favourites.splice(found, 1);
+    store.favorites.splice(found, 1);
     write(store);
     return false;
   }
-  store.favourites.unshift({
+  store.favorites.unshift({
     address: identity.address,
     queryPort: identity.queryPort,
     hostname: identity.hostname,
@@ -130,7 +132,7 @@ export function toggleFavourite(subject) {
 /** Unstar by address, for a row that is not in the current list. */
 export function forget(address) {
   const store = read();
-  store.favourites = store.favourites.filter((saved) => saved.address !== address);
+  store.favorites = store.favorites.filter((saved) => saved.address !== address);
   write(store);
 }
 

@@ -144,8 +144,8 @@ This also fixes F11 — the same change, once.
 
 "Check this folder" (`setup.js:235`), "Join check" (`join.js:299`), "Check again" (`join.js:170`),
 "Check" (`servers.js:725`), "Check the other 8" (`servers.js:891`), "not in this check"
-(`servers.js:763`), "8 favourites not in this Spearhead check" (`servers.js:631`), "From the check
-at 14:32" (`join.js:205`), "3 of 11 favourites in this check" (`servers.js:877`), "checking
+(`servers.js:763`), "8 favorites not in this Spearhead check" (`servers.js:631`), "From the check
+at 14:32" (`join.js:205`), "3 of 11 favorites in this check" (`servers.js:877`), "checking
 archive" (`join.js:527`), "The check could not run" (`join.js:169`), "Checking servers"
 (`servers.js:786`), "Back to the check" (`join.js:711`).
 
@@ -155,7 +155,7 @@ and "Refresh" (`servers.js:204`, `:296`), so the player has no word at all for t
 bar calls "this check".
 
 This is the highest-frequency vocabulary in the app and the vocabulary a non-native reader has
-least slack for. "8 favourites not in this Spearhead check" is unparseable on first read. It
+least slack for. "8 favorites not in this Spearhead check" is unparseable on first read. It
 violates the one named rule in federal plain-language guidance (`docs/ux-standards.md` 2.1).
 
 **Fix.** Reserve *check* for one meaning — asking one server — and rename the rest: the sweep
@@ -283,7 +283,7 @@ use `--ink`. Costs about 8 vertical pixels.
 ### F13 · Search behaves differently in the two halves of the same list
 `matchesFilters()` matches `hostname` only (`store.js:291-296`); `partitionScope()`'s absent branch
 matches `hostname` **or** `address` (`store.js:343-345`). Pasting an IP in **All** gives "Nothing
-matches" while the server is on screen; the same paste in **Favourites** finds it.
+matches" while the server is on screen; the same paste in **Favorites** finds it.
 
 **Fix.** Add `|| row.address.includes(query)` to `matchesFilters`. *Done.*
 
@@ -301,7 +301,7 @@ published no round trip is not hidden by a ceiling it cannot be measured against
 
 ### F16 · No way to reach a server by typing its address · *Assumed*
 `check_server` already takes an arbitrary address and query port (`api.js:65`), but the interface
-only ever calls it for entries already in `favourites()` or `history()`. A player handed an IP in
+only ever calls it for entries already in `favorites()` or `history()`. A player handed an IP in
 Discord — *Assumed* to be how most MOHAA servers are shared — has no entry point, and no way to
 create the bookmark that would give them one. F9's own premise argues for this and the backend
 exists.
@@ -516,7 +516,7 @@ Not in the table and still outstanding: F10, F12, F16, F17, F18, F19, F21.
   window and the corner can no longer contradict each other. Both paths were exercised against a
   real failure — a temporary unresolvable master host, reverted — rather than reasoned about.
 - **F5, F7, F20** — *check* now means one thing: asking one server. The sweep is the **server
-  list** throughout ("not in this list", "3 of 11 favourites in this list", "From the server list
+  list** throughout ("not in this list", "3 of 11 favorites in this list", "From the server list
   at 21:59"). `Join check` → **Before you join**; `Check this folder` → **Use this folder**; `Back
   to the check` → **Back to server details**; `checking archive` → **checking the file**;
   `Has people` → **Not empty**, identifier included; `Cannot join yet` → **Cannot join while this

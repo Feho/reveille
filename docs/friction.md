@@ -152,10 +152,10 @@ nobody on their first run and potentially everybody after it.
 **Evidence** *Assumed.* Requested by the project owner, 24 Aug 2026. **No player has been observed
 asking for it**, and the two figures that would make it Measured are not collected: how often a
 returning player looks for a specific server, and how often a server they starred is absent from
-a given sweep. The second one is now cheap to measure — the Favourites status bar computes
+a given sweep. The second one is now cheap to measure — the Favorites status bar computes
 "N of M in this list" on every sweep — and is worth capturing before this entry is ranked
 against anything above it.
-**What Reveille does** A star on every row, and two extra list scopes: **Favourites** and
+**What Reveille does** A star on every row, and two extra list scopes: **Favorites** and
 **History**. A saved server the current sweep did not return is not hidden and not drawn with the
 figures it had last time — it says "not in this list" and offers a **Check** button that runs
 the same probe against that one address, without a master list. That last part is the point: the
@@ -180,7 +180,7 @@ gap between a row's measurement and the join it leads to; that is not collected.
 old remedy is Measured — a full sweep is a couple of hundred probes (`plan.md:233`).
 **What Reveille does** The detail pane says when the row was measured — **From the check at 14:32**
 for a row the sweep returned, **Checked at 14:32** for one asked again on its own — and offers
-**Check again** (`R`), which runs the same one-request `check_server` probe an absent favourite's
+**Check again** (`R`), which runs the same one-request `check_server` probe an absent favorite's
 **Check** runs. The time is part of the feature, not decoration: a server that answers with the same
 four players it had before would otherwise leave the player unable to tell whether anything
 happened.

@@ -67,7 +67,7 @@ async fn a_direct_check_builds_the_same_server_a_sweep_would() {
 #[tokio::test]
 async fn a_server_that_never_answers_is_a_recorded_non_result() {
     // Bound but silent: the reason has to be timeout at the GameSpy stage, not an error thrown
-    // out of the probe. A favourite that does not answer is information about that favourite.
+    // out of the probe. A favorite that does not answer is information about that favorite.
     let query = bind().await;
     let query_port = port(&query);
 

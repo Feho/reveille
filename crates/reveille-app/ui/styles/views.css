@@ -133,7 +133,7 @@
   overflow-y: auto;
   /* Reserve the scrollbar's 10px whether or not it is drawn. Every column but
      Server has a fixed width, so the name column absorbs the whole difference:
-     without this, All (which scrolls) and a short Favourites or History (which
+     without this, All (which scrolls) and a short Favorites or History (which
      does not) laid the same names out at two different widths, and switching
      scope visibly shifted the column. */
   scrollbar-gutter: stable;

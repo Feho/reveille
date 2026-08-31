@@ -218,7 +218,7 @@ CLI's default join client is the bare name `openmohaa`. Classify *after* the spa
 `reveille-platform::a_bare_program_name_is_resolved_rather_than_treated_as_a_path`.
 
 ### H15 · Never fold a remembered entry away without stating how many are folded
-**Because** Favourites and History are collapsed by default down to what the current check
+**Because** Favorites and History are collapsed by default down to what the current check
 returned, because a folder with more than one game fills them with entries that can never answer:
 the three register with the master separately, so a server saved under Spearhead is not in Allied
 Assault's list and its **Check** can only ever find the same thing. Twenty rows of "not in this
@@ -235,7 +235,7 @@ is non-empty — open or shut, so the count is on screen either way — and only
 behind it. `ui/views/servers.js` `disclosureRow` draws it with `aria-expanded`, in the row where
 those entries would have been, and `liveText` repeats the folded count for a screen reader.
 `scopedStatusbar` withholds **Check the other N** while the block is shut, because the whole of
-that button's effect is inside the block. `ui/app.js` `autoCheckFavourites` waits for the same
+that button's effect is inside the block. `ui/app.js` `autoCheckFavorites` waits for the same
 thing, for the same reason. Test:
 `reveille-app::folded_remembered_entries_always_state_their_count` — a text check over `store.js`
 and `servers.js`, for the same reason as the ones under H12: the shell has no test runner and the

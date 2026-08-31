@@ -23,7 +23,7 @@ import {
   onSelfUpdateProgress,
   previewJoin,
 } from "./lib/api.js";
-import { favourites, recordLaunch, toggleFavourite } from "./lib/bookmarks.js";
+import { favorites, recordLaunch, toggleFavorite } from "./lib/bookmarks.js";
 import { clockTime, displayPath } from "./lib/format.js";
 import {
   GAME_LABELS,
@@ -495,7 +495,7 @@ onInstallProgress((progress) => {
  * It is a generation, not a cancellation: a sweep and a game switch both make every answer still in
  * flight an answer about a list that no longer exists. Two checks running at once do **not** cancel
  * each other — an earlier design bumped this on every call, so re-checking one server abandoned the
- * favourites batch mid-way and left the row it was probing reading "Checking…" for a request nobody
+ * favorites batch mid-way and left the row it was probing reading "Checking…" for a request nobody
  * was waiting on.
  */
 let checkGeneration = 0;
@@ -503,7 +503,7 @@ let checkGeneration = 0;
 /**
  * Ask one server directly, without a master list.
  *
- * Two players want this, for opposite reasons. A favourite is often not in the sweep — the master
+ * Two players want this, for opposite reasons. A favorite is often not in the sweep — the master
  * never registered it, or it did not answer in time — and until it is in the list it cannot be
  * selected or joined, so this is what makes a bookmark useful in the case that matters most. And
  * a server that *is* in the list was measured once, when the sweep ran: its map, its client count
@@ -608,7 +608,7 @@ function recheck(row) {
  * A server that moved is **not** followed. The selection stays where the player put it and the pane
  * says where the answer came from, for the same reason a bookmark is not repointed: the two
  * addresses share a query port, which is not proof they are the same server. Following would also
- * select a row that, in Favourites or History, is not in the table at all.
+ * select a row that, in Favorites or History, is not in the table at all.
  */
 function resettle(before, after) {
   if (!after || after.address !== before?.address) {
@@ -645,7 +645,7 @@ function sameJoinQuestion(before, after) {
 }
 
 /**
- * Check the favourites this sweep did not return, once per sweep, while they are on screen.
+ * Check the favorites this sweep did not return, once per sweep, while they are on screen.
  *
  * Without it, opening the absent block after a refresh shows a list of servers with no data and a
  * row of buttons to press. Once per sweep, and only for the ones actually missing, keeps it to a
@@ -656,17 +656,17 @@ function sameJoinQuestion(before, after) {
  * to servers that were saved under another game and can only ever say the same thing. Opening the
  * block notifies, so the check runs then instead.
  */
-function autoCheckFavourites() {
-  if (state.scope !== "favourites" || !state.showAbsent) return;
+function autoCheckFavorites() {
+  if (state.scope !== "favorites" || !state.showAbsent) return;
   if (state.browse.running || !state.browse.completedAt) return;
   if (state.autoCheckedAt === state.browse.completedAt) return;
   const present = new Set(state.servers.map((row) => row.address));
-  const absent = favourites().filter((entry) => !present.has(entry.address));
+  const absent = favorites().filter((entry) => !present.has(entry.address));
   state.autoCheckedAt = state.browse.completedAt;
   if (absent.length) check(absent);
 }
 
-subscribe(autoCheckFavourites);
+subscribe(autoCheckFavorites);
 
 /* Dialogs and global keys ---------------------------------------------------- */
 
@@ -762,7 +762,7 @@ document.addEventListener("keydown", (event) => {
     const row = selectedRow();
     if (!row) return;
     event.preventDefault();
-    toggleFavourite(row);
+    toggleFavorite(row);
     notify();
   } else if ((event.key === "r" || event.key === "R") && !typing && plain) {
     // Plain R re-asks the selected server; Ctrl+R, handled above, re-asks the whole list. The

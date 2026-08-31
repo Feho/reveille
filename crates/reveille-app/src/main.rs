@@ -1090,7 +1090,7 @@ async fn stream_sweep(
 
 /// Check one remembered server directly, with no master list involved.
 ///
-/// A favourite is often not in the current sweep — the master never registered it, or it did not
+/// A favorite is often not in the current sweep — the master never registered it, or it did not
 /// answer in time. Without this the bookmark would be a dead row: `install_and_launch` resolves
 /// its target out of the sweep's list, so a server missing from that list cannot be joined at all.
 /// A server that answers here is merged into the same list and becomes joinable like any other.
@@ -2202,7 +2202,7 @@ mod tests {
 
     #[test]
     fn folded_remembered_entries_always_state_their_count() {
-        // The same text check as the two above, guarding H15. Favourites and History fold the
+        // The same text check as the two above, guarding H15. Favorites and History fold the
         // entries this check did not return behind a disclosure, and the one thing that keeps a
         // fold from being an invisible filter is that the count is drawn whether it is open or
         // shut. A regression here is silent: rows simply stop being there.
@@ -2244,7 +2244,7 @@ mod tests {
     #[test]
     fn one_check_does_not_cancel_another() {
         // Also found by review. A single token bumped per call meant re-checking one server
-        // abandoned the favourites batch mid-way and left the row it was probing reading
+        // abandoned the favorites batch mid-way and left the row it was probing reading
         // "Checking…" for a request nobody was waiting on. The token counts list generations —
         // a sweep and a game switch — not calls.
         let app = include_str!("../ui/app.js");

@@ -187,24 +187,24 @@ There is **one** primary surface. The three-screen wizard was removed.
   report its outcome into another. The choice is remembered per install folder and named in the
   titlebar chip beside the engine.
 - **Servers** (`views/servers.js`) — where the session lives.
-- **Scope** (`All` · `Favourites` · `History`) — three exclusive buttons in the toolbar, after
+- **Scope** (`All` · `Favorites` · `History`) — three exclusive buttons in the toolbar, after
   **Game**. Not tabs: there is still one table, one set of columns and one selection; these
   buttons choose which *view* of the selected game's servers is drawn. **Game** selects the
   population, Scope selects the view — a distinction worth keeping in the copy, because they sit
   next to each other. **This is not a compatibility filter** and must never grow
-  into one — see §2.1 on why there is no "only compatible" control. `Favourites` lists what the
+  into one — see §2.1 on why there is no "only compatible" control. `Favorites` lists what the
   player starred; `History` lists what Reveille launched the game for, most recent first, which is
   a sort key no column header owns, so no arrow is drawn in that scope. **One table means one set of
   column widths**, and the switch may not change them. Every column but **Server** has a fixed
   width, so the name column absorbs any error in the rest of the layout, and it absorbed two:
     - The list pane reserves its scrollbar gutter permanently. Without that, a scrolling `All` and
-      a short `Favourites` handed the name column two widths 10px apart.
+      a short `Favorites` handed the name column two widths 10px apart.
     - **An absent row's `colspan` counts the columns actually drawn, never `COLUMNS.length`.** The
       narrow-window breakpoints drop Runs, then Mode, then Ping, and a dropped column is gone from
       the table rather than merely invisible — so below 1200px a colspan of `COLUMNS.length - 2`
       overran the row. An overrunning colspan is not clipped: Chromium invents the column that was
       asked for and splits the free width evenly between that phantom and **Server**. Measured at a
-      1150px viewport, that halved the name column to 128px and left `Favourites` and `History` —
+      1150px viewport, that halved the name column to 128px and left `Favorites` and `History` —
       the two scopes that have absent rows — visibly narrower than `All`, which has none.
       `columnsShown()` reads the count off the header row, so the media queries stay the one place
       the drop order is written down, and a resize that crosses a breakpoint repaints the rows.
@@ -232,7 +232,7 @@ There is **one** primary surface. The three-screen wizard was removed.
   **runs Spearhead, which is not in this game folder**: an action that cannot work is worse than
   none. The button runs `check_server`, the same probe the sweep runs at
   the same deadline; a server that answers becomes an ordinary row and is joinable, and one that
-  does not says **did not answer** with the recorded reason in its `title`. Favourites the sweep
+  does not says **did not answer** with the recorded reason in its `title`. Favorites the sweep
   missed are checked once automatically per completed sweep, on first entry into that scope **with
   the absent block open** — collapsed, those probes would write their answers where nobody can
   read them.
@@ -241,7 +241,7 @@ There is **one** primary surface. The three-screen wizard was removed.
   scopes for ever: the three games register with the master separately, so a server starred while
   browsing Spearhead is never in an Allied Assault check and its **Check** can only ever find the
   same thing. The disclosure sits in the row where those entries would have been and reads
-  **▸ 8 favourites not in this Spearhead check** — the game is named only where the folder has more
+  **▸ 8 favorites not in this Spearhead check** — the game is named only where the folder has more
   than one, by the same rule that hides the game select. Open, it reads **▾** and the rows follow
   unchanged.
   **This is a fold, not a filter, and it must stay one.** The count is on screen whether the block
@@ -252,7 +252,7 @@ There is **one** primary surface. The three-screen wizard was removed.
   game it now runs. The criterion is the one the rows already state — this list does not hold
   them.
   **Check the other N** in the status bar is drawn only while the block is open, because the whole
-  of its effect is inside the block. The status bar's own count (**3 of 11 favourites in this
+  of its effect is inside the block. The status bar's own count (**3 of 11 favorites in this
   check**) is taken against everything saved, search box or no search box; the disclosure counts
   what it is actually hiding. The two answer different questions, which is why they can differ
   while a search is typed.
@@ -274,7 +274,7 @@ There is **one** primary surface. The three-screen wizard was removed.
   refused in the other direction for the same reason, while a probe for that row is in flight.
 - **A check that runs and gets no answer takes the row out of the list.** The figures it replaces
   were true of the last check and have just been shown not to be true now, so they are dropped
-  rather than left standing (rule **H12**). In `Favourites` or `History` the row becomes an ordinary
+  rather than left standing (rule **H12**). In `Favorites` or `History` the row becomes an ordinary
   absent row; in `All` it leaves the table altogether. The selection is kept either way and the
   detail pane says which server it was, in the *remembered* style, what the check found — **Did not
   answer**, **Runs Spearhead**, **Answers at another address** — and offers **Check again**. An
@@ -309,7 +309,7 @@ Change a rule in the register first, then update the right-hand column here.
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
 | **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. |
 | **H11** · Never call the measured round trip the in-game ping | The column is **Ping** because that is the word players look for, but every explanation is the honest one: the tooltip says "Time for one status request to this server and back, measured once during this check. Not the in-game ping." The figure carries no colour, no bars and no bands — it is a measurement to sort by, not a verdict, for the same reason the list carries no traffic light. The toolbar's **Ping under** gate names itself after the column, so the control and the figure make the same claim. |
-| **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favourite says **not in this list** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. A live row says when it was measured (**Checked at 14:32**) and is dropped outright when a later check finds the server gone. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
+| **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favorite says **not in this list** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. A live row says when it was measured (**Checked at 14:32**) and is dropped outright when a later check finds the server gone. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
 | **H16** · Never offer the installed or an older Reveille release as an update | The titlebar and first-run card show **Update Reveille** only after the updater has compared semantic versions from the latest published manifest. The dialog names both versions and never constructs an offer from release text or a filename. Signature verification is the install gate in S6; it does not sign the manifest's version label. |
 | **S2** · Never change engine files while an affected program is running | Installation and Original/Reborn activation are blocked unless the relevant process query confirms stopped. Unknown is blocking, not permission. |
 | **S5** · Preserve original executables before installing Reborn | Reborn installation retains first-seen originals. Switching changes the active canonical copies and never describes either managed engine as uninstalled. |
@@ -455,7 +455,7 @@ platform v1 supports.
 - **A single-server check is announced.** The `role="status"` region reports the check starting, a
   command that could not run, and a server dropped from the list — otherwise the one interaction
   with no progress meter, and the one that can remove the row the player is looking at, would be
-  silent. Only the *selected* server is announced; a favourites batch would bury the sweep summary.
+  silent. Only the *selected* server is announced; a favorites batch would bury the sweep summary.
 - Bare-letter shortcuts (`/`, `F`, `R`) fire only when the event target is not a form control, not
   contenteditable, and not inside an open dialog, and only with no Ctrl/Alt/Meta held. `R` on the
   game `<select>` is that control's own type-ahead, not a re-check.

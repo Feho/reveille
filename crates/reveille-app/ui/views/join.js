@@ -32,7 +32,7 @@ import {
   stateExplanation,
   stateName,
 } from "../lib/format.js";
-import { historyByAddress, isFavourite, toggleFavourite } from "../lib/bookmarks.js";
+import { historyByAddress, isFavorite, toggleFavorite } from "../lib/bookmarks.js";
 import {
   GAME_LABELS,
   canRecheck,
@@ -97,7 +97,7 @@ function body(row, onRecheck) {
 }
 
 function header(row, server, onRecheck) {
-  const starred = isFavourite(row.address);
+  const starred = isFavorite(row.address);
   const launched = launchedLabel(historyByAddress().get(row.address));
   return el(
     "div",
@@ -114,10 +114,10 @@ function header(row, server, onRecheck) {
           className: "star star--lg",
           dataset: { focusKey: "detail-star" },
           "aria-pressed": starred ? "true" : "false",
-          "aria-label": `Favourite ${server.hostname || row.address}`,
-          title: starred ? "Remove from favourites" : "Add to favourites",
+          "aria-label": `Favorite ${server.hostname || row.address}`,
+          title: starred ? "Remove from favorites" : "Add to favorites",
           onclick: () => {
-            toggleFavourite(row);
+            toggleFavorite(row);
             update(() => {});
           },
         },

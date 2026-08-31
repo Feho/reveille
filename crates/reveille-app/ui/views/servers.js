@@ -33,11 +33,11 @@ import {
 } from "../lib/format.js";
 import {
   clearHistory,
-  favouriteAddresses,
-  favourites,
+  favoriteAddresses,
+  favorites,
   history,
   historyByAddress,
-  toggleFavourite,
+  toggleFavorite,
 } from "../lib/bookmarks.js";
 import {
   GAME_LABELS,
@@ -57,7 +57,7 @@ import {
 const COLUMNS = [
   // The star has no label: a column heading over one glyph reads as data. The cell's own
   // accessible name carries the meaning instead.
-  { key: "star", label: "Favourite", sortable: false, className: "col-star", hideLabel: true },
+  { key: "star", label: "Favorite", sortable: false, className: "col-star", hideLabel: true },
   { key: "name", label: "Server", sortable: true, className: "col-name" },
   // "Players", not "Clients": `numplayers` is `SV_NumClients()` and bots are *not* in
   // `svs.clients` — measured live on all 11 bot servers (docs/plan.md, milestone 2). So the
@@ -99,7 +99,7 @@ const COLUMNS = [
  * `colspan` here has to agree with that or it runs off the end of the row — and a `colspan` that
  * overruns is not clipped. Chromium answers it by inventing the column the span asked for and
  * splitting the free width evenly between that phantom and **Server**, the only column with no
- * fixed width. That is what made the server name half its proper width in Favourites and History,
+ * fixed width. That is what made the server name half its proper width in Favorites and History,
  * which have absent rows, and full width in All, which has none.
  *
  * Read from the header row rather than from a matching set of breakpoints in JavaScript, so the
@@ -113,11 +113,11 @@ function columnsShown(table) {
   return shown || COLUMNS.length;
 }
 
-const SCOPE_LABELS = { all: "All", favourites: "Favourites", history: "History" };
+const SCOPE_LABELS = { all: "All", favorites: "Favorites", history: "History" };
 
 const CAPTIONS = {
   all: "Servers answering now",
-  favourites: "Starred servers, and whether they are in this list",
+  favorites: "Starred servers, and whether they are in this list",
   history: "Servers Reveille launched the game for, most recent first",
 };
 
@@ -351,7 +351,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
   };
 
   const paintScope = () => {
-    const counts = { all: state.servers.length, favourites: favourites().length, history: history().length };
+    const counts = { all: state.servers.length, favorites: favorites().length, history: history().length };
     for (const button of scopeButtons) {
       const { scope } = button.dataset;
       button.setAttribute("aria-pressed", state.scope === scope ? "true" : "false");
@@ -433,14 +433,14 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
    * pane's, and the `F` key.
    */
   const syncStars = () => {
-    const starred = favouriteAddresses();
+    const starred = favoriteAddresses();
     for (const tr of tbody.children) {
       const address = tr.dataset.address ?? tr.dataset.remembered;
       const button = address && tr.querySelector(".star");
       if (!button) continue;
       const on = starred.has(address);
       button.setAttribute("aria-pressed", on ? "true" : "false");
-      button.title = on ? "Remove from favourites" : "Add to favourites";
+      button.title = on ? "Remove from favorites" : "Add to favorites";
       button.textContent = on ? "★" : "☆";
     }
   };
@@ -451,7 +451,7 @@ export function serversView({ onRefresh, onCancel, onSelect, onShowNonResults, o
     lastSignature = signature(items);
     lastColumns = columnsShown(table);
     // Read the starred set once. Asking per row would parse the store a hundred-odd times a paint.
-    const starred = favouriteAddresses();
+    const starred = favoriteAddresses();
     const launches = state.scope === "history" ? historyByAddress() : null;
     const build = (item) => {
       if (item.kind === "live") return row(item.row, starred, launches, onSelect);
@@ -598,7 +598,7 @@ function toggle(label, onclick) {
  * The star. A real button, so it is reachable by keyboard and announces its own state; the click
  * must not fall through to the row, or starring would also change the selection.
  *
- * Takes a live row or a remembered entry, because a favourite can be unstarred from a row this
+ * Takes a live row or a remembered entry, because a favorite can be unstarred from a row this
  * sweep did not return.
  */
 function starCell(subject, address, hostname, starred) {
@@ -615,11 +615,11 @@ function starCell(subject, address, hostname, starred) {
         // The grid owns the tab order; `syncSelection` rewrites this on every render anyway.
         tabIndex: -1,
         "aria-pressed": on ? "true" : "false",
-        "aria-label": `Favourite ${name}`,
-        title: on ? "Remove from favourites" : "Add to favourites",
+        "aria-label": `Favorite ${name}`,
+        title: on ? "Remove from favorites" : "Add to favorites",
         onclick: (event) => {
           event.stopPropagation();
-          toggleFavourite(subject);
+          toggleFavorite(subject);
           update(() => {});
         },
       },
@@ -711,7 +711,7 @@ function row(item, starred, launches, onSelect) {
 
 /** The scope's own word for what it holds, singular or plural. */
 const SAVED_NOUNS = {
-  favourites: ["favourite", "favourites"],
+  favorites: ["favorite", "favorites"],
   history: ["launched server", "launched servers"],
 };
 
@@ -724,7 +724,7 @@ function savedNoun(count = 0) {
  * The head of the absent block: how many remembered entries this list does not hold, and the
  * control that folds them out of the way.
  *
- * Absent entries used to sit open at the foot of Favourites and History. On a folder with more
+ * Absent entries used to sit open at the foot of Favorites and History. On a folder with more
  * than one game that is where most of them live for ever — Allied Assault, Spearhead and
  * Breakthrough register with the master separately, so a server starred under one of them is
  * never in another's list and its Check button can only ever find the same thing. Twenty rows of
@@ -935,8 +935,8 @@ function emptyRow(columns) {
   let body;
   // A scope with nothing saved and a scope whose entries are all filtered out are different
   // problems, and only one of them is fixed by clearing the search box.
-  if (state.scope === "favourites" && favourites().length === 0) {
-    body = [el("h3", null, "No favourites yet"), el("p", null, "Star a server to keep it here.")];
+  if (state.scope === "favorites" && favorites().length === 0) {
+    body = [el("h3", null, "No favorites yet"), el("p", null, "Star a server to keep it here.")];
   } else if (state.scope === "history" && history().length === 0) {
     body = [
       el("h3", null, "Nothing launched yet"),
@@ -1233,7 +1233,7 @@ function liveText() {
 /**
  * What the last one-server check is doing or found, for the live region.
  *
- * Only the selected server is announced. A favourites batch checks several at once and reading out
+ * Only the selected server is announced. A favorites batch checks several at once and reading out
  * each one would bury the sweep summary the region is otherwise for.
  */
 function singleCheckText() {
@@ -1352,7 +1352,7 @@ function onRowContextMenu(event, onSelect, onCheck) {
   const live = state.servers.find((item) => item.address === address) ?? null;
   const saved = savedEntries().find((entry) => entry.address === address) ?? null;
   const subject = live ?? saved;
-  const starred = favouriteAddresses().has(address);
+  const starred = favoriteAddresses().has(address);
   const queryPort = live
     ? Number(live.server.endpoint.query_port)
     : (saved?.queryPort ?? null);
@@ -1360,10 +1360,10 @@ function onRowContextMenu(event, onSelect, onCheck) {
   openMenu(
     [
       subject && {
-        label: starred ? "Remove from favourites" : "Add to favourites",
+        label: starred ? "Remove from favorites" : "Add to favorites",
         hint: "F",
         onSelect: () => {
-          toggleFavourite(subject);
+          toggleFavorite(subject);
           update(() => {});
         },
       },

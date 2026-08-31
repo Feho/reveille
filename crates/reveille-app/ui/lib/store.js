@@ -3,7 +3,7 @@
 // One state object and a subscribe/notify pair. Views read `state` and re-render
 // on change; nothing else holds application state.
 
-import { favourites, history, historyByAddress } from "./bookmarks.js";
+import { favorites, history, historyByAddress } from "./bookmarks.js";
 
 const INSTALL_KEY = "reveille.install";
 const FILTERS_KEY = "reveille.filters";
@@ -130,7 +130,7 @@ export const state = {
    * stream in across a whole sweep, so its finish time is not when any particular row answered.
    */
   checkedAt: new Map(),
-  /** Sweep completion the favourites auto-check has already run for, so it runs once. */
+  /** Sweep completion the favorites auto-check has already run for, so it runs once. */
   autoCheckedAt: null,
 
   /**
@@ -296,7 +296,10 @@ export function loadFilters() {
       maxPing: PING_LIMITS.includes(saved.maxPing) ? saved.maxPing : null,
     };
     if (saved.sort?.column) state.sort = saved.sort;
-    if (SCOPES.includes(saved.scope)) state.scope = saved.scope;
+    // `favourites` is the pre-rename scope value, mapped so a player who left the app on that
+    // tab comes back to it rather than to All.
+    const scope = saved.scope === "favourites" ? "favorites" : saved.scope;
+    if (SCOPES.includes(scope)) state.scope = scope;
     state.showAbsent = !!saved.showAbsent;
   } catch {
     // Ignore a corrupt preference rather than refusing to start.
@@ -305,7 +308,7 @@ export function loadFilters() {
 
 /* Derived ------------------------------------------------------------------ */
 
-export const SCOPES = ["all", "favourites", "history"];
+export const SCOPES = ["all", "favorites", "history"];
 
 const SORTERS = {
   name: (row) => row.server.hostname.toLowerCase(),
@@ -337,7 +340,7 @@ export const PING_LIMITS = [null, 80, 150, 250];
  *
  * The query matches the **address** as well as the name. It matched only the name here while
  * `partitionScope` below matched both, so pasting an IP into All said "Nothing matches" with the
- * server on screen, and the same paste in Favourites found it (docs/design-review.md F13).
+ * server on screen, and the same paste in Favorites found it (docs/design-review.md F13).
  */
 function matchesFilters(row) {
   const query = state.filters.query.trim().toLowerCase();
@@ -380,7 +383,7 @@ function sortRows(rows) {
 
 /** The entries a saved scope draws from: the starred ones, or the launched ones. */
 export function savedEntries() {
-  return state.scope === "favourites" ? favourites() : history();
+  return state.scope === "favorites" ? favorites() : history();
 }
 
 /**

@@ -889,7 +889,7 @@ None of this blocks v1. It is written down so that v1 does not accidentally fore
 particular, do not let the reactive path bake in an assumption that content only ever arrives
 because a server asked for it.
 
-**Favourites and launch history are not the v2 catalogue, and must not become its foundation.**
+**Favorites and launch history are not the v2 catalogue, and must not become its foundation.**
 Added 24 Aug 2026. What they store is deliberately the smallest thing that works: an address, the
 master's query port, and the name the server had when it was saved. No content state, no installed
 state, no compatibility verdict — those are facts about a moment, and re-deriving them is exactly
