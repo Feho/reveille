@@ -37,8 +37,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"],
+    "targets": ["nsis", "app", "dmg"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
     "publisher": "Reveille",
     "homepage": "https://github.com/MOHCentral/reveille",
     "license": "GPL-2.0-only",
@@ -49,6 +49,9 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
     }
   }
 }

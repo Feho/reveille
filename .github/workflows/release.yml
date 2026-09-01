@@ -2,9 +2,14 @@
 
 name: Release
 
-# A tag builds the Windows installer and attaches it to a *draft* release. Publishing stays a
+# A tag builds the Windows NSIS installer and attaches it to a *draft* release. Publishing stays a
 # deliberate act by the owner. Manual runs build the same installer and leave it as a workflow
 # artifact, so the packaging can be exercised without minting a release.
+#
+# macOS `.app`/`.dmg` bundles are not produced here: they need a Mac runner, and Gatekeeper
+# notarisation needs an Apple Developer certificate this project does not have. Build those on a
+# Mac with `just bundle-macos` (see README). Do not point `tauri build --bundles nsis` at macOS;
+# NSIS is a Windows installer.
 on:
   push:
     tags:

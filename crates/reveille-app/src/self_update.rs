@@ -82,6 +82,12 @@ pub async fn check_reveille_update(
     if PUBLIC_KEY.trim().is_empty() {
         return Ok(None);
     }
+    // Published updater artifacts are the Windows NSIS installer and `latest.json` keyed as
+    // `windows-x86_64`. A macOS `.app`/`.dmg` is not a signed updater target yet, so a Mac
+    // build must not offer to install that Windows package.
+    if !cfg!(windows) {
+        return Ok(None);
+    }
 
     let _operation = state
         .operation

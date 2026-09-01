@@ -227,7 +227,7 @@ installation is therefore loadable by the engine and reported missing by Reveill
 recorded limit, not an oversight: modelling the other roots means deciding which of several
 installations the player meant, and setup already asked them that.
 
-### 3b. The home path is `%APPDATA%\openmohaa`, not `%APPDATA%\moh`
+### 3b. The home path is `%APPDATA%\openmohaa` on Windows, `~/Library/Application Support/openmohaa` on macOS
 
 **Correction, 26 Aug 2026.** `plan.md` cited `q_shared.h:47` for `%APPDATA%\moh`. That define is
 `HOMEPATH_NAME_WIN_MOH`, and it — with `HOMEPATH_NAME_WIN_MOHTA` (`mohta`) and
@@ -235,6 +235,11 @@ installations the player meant, and setup already asked them that.
 `Sys_DefaultHomePath` appends is `com_homepath`, empty for a non-demo build
 (`common.c:1769-1771`), and otherwise `HOMEPATH_NAME`, which is `"openmohaa"`
 (`q_shared.h:81`, `sys_win32.c:114-117`).
+
+On macOS the same name is appended to `$HOME/Library/Application Support/`
+(`sys_unix.c:130-140` under `__APPLE__`). Linux uses `$XDG_DATA_HOME/openmohaa` or
+`$HOME/.local/share/openmohaa` (`sys_unix.c:194-205`). Reveille does not pass `fs_homepath`; it
+follows these defaults.
 
 So there is **one** home path for all three games, with `main`, `mainta` and `maintt` inside it —
 not one per product. Content written to `%APPDATA%\moh\main` is in a directory the engine never

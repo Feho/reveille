@@ -145,7 +145,7 @@ const PRODUCTS: [Product; 3] = [
     Product::Breakthrough,
 ];
 
-const CLIENT_BINARIES: [&str; 7] = [
+const CLIENT_BINARIES: [&str; 13] = [
     "mohaa.exe",
     "mohaas.exe",
     "mohaab.exe",
@@ -153,6 +153,12 @@ const CLIENT_BINARIES: [&str; 7] = [
     "moh_breakthrough.exe",
     "openmohaa.exe",
     "openmohaa",
+    "launch_openmohaa_base",
+    "launch_openmohaa_base.exe",
+    "launch_openmohaa_spearhead",
+    "launch_openmohaa_spearhead.exe",
+    "launch_openmohaa_breakthrough",
+    "launch_openmohaa_breakthrough.exe",
 ];
 
 // Measured from a French retail-disc install on Windows, 19 Aug 2026.
@@ -344,6 +350,25 @@ mod tests {
             identify(temporary.path()),
             Err(Error::NoDataDirectories(_))
         ));
+    }
+
+    #[test]
+    fn identifies_the_unix_openmohaa_client_and_launchers() {
+        let temporary = TempDir::new().expect("temporary directory");
+        fs::create_dir(temporary.path().join("main")).expect("main directory");
+        fs::write(temporary.path().join("openmohaa"), b"unix client").expect("unix client");
+        fs::write(
+            temporary.path().join("launch_openmohaa_base"),
+            b"unix launcher",
+        )
+        .expect("unix launcher");
+
+        let install = identify(temporary.path()).expect("identify install");
+        assert_eq!(
+            install.identification,
+            IdentificationMethod::RecognizedBinaryUnknownHashes
+        );
+        assert_eq!(install.binaries.len(), 2);
     }
 
     #[test]

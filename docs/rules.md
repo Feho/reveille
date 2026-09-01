@@ -93,7 +93,8 @@ limit.
 computed. No test.
 
 ### H8 · Say where files actually went
-**Because** When an install falls back to `%APPDATA%\openmohaa\main`, a player who later wants
+**Because** When an install falls back to `%APPDATA%\openmohaa\main` (Windows) or
+`~/Library/Application Support/openmohaa/main` (macOS), a player who later wants
 to delete a map must be able to find it.
 **Enforced at** `used_home_fallback` is plumbed to the shell (`main.rs:138,163,691,901`) and the
 real path is printed, not a euphemism.
@@ -268,11 +269,13 @@ someone else's server. That is a join, not a probe.
 **Because** Replacing files used by a live game, dedicated server or launcher corrupts an
 installation, and on Windows fails part-way through.
 **Enforced at** package installation and engine activation require a conservative process query
-to confirm that every affected program is stopped. The query is run **after** a download and
-before the transactional apply, so a program started mid-transfer is still seen. An unavailable
-or malformed process result is unknown and blocks the change. Tests cover the OpenMoHAA release
-programs and `MOHAA.exe`, `moh_spearhead.exe`, and `moh_breakthrough.exe`, including case and
-malformed output.
+to confirm that every affected program is stopped. On Windows that query is `tasklist`; on macOS
+and Linux it is `ps -ax -o comm=`, matching the same executable stems — including the Unix
+`openmohaa` binary and `launch_openmohaa_*` helpers, not only `openmohaa.exe`. The query is run
+**after** a download and before the transactional apply, so a program started mid-transfer is still
+seen. An unavailable or malformed process result is unknown and blocks the change. Tests cover
+the OpenMoHAA release programs and `MOHAA.exe`, `moh_spearhead.exe`, and `moh_breakthrough.exe`,
+including case and malformed output.
 **Scope** The probe covers every executable a package replaces, not only the selected client — a
 running dedicated server or expansion client can hold another file in the same transaction. The
 platform result records which kind was observed so interface copy states only what was known.

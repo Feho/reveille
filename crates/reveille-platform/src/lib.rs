@@ -2,8 +2,9 @@
 
 //! Shared launcher and content-path policy for Reveille's executable front ends.
 //!
-//! The policy encoded here targets Windows, which is v1's only supported platform, but the code
-//! is portable so the composed pipeline stays exercisable — and testable in CI — on Linux.
+//! Windows remains the packaged v1 target (NSIS). macOS uses the same overlay install of the
+//! official `OpenMoHAA` archive into a player-picked folder that already has `main/`; the Reveille
+//! app itself is built as `.app`/`.dmg` there, not as NSIS. Linux keeps the crate portable for CI.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,7 @@ use std::process::Command;
 use reveille_core::discovery::TargetGame;
 use reveille_core::engine::EngineChoice;
 use reveille_core::join::{LaunchCommand, LaunchDialect, LaunchProfile};
-#[cfg(any(windows, test))]
+#[cfg(any(unix, test))]
 use reveille_core::platform::openmohaa;
 use reveille_core::platform::openmohaa::ClientActivity;
 use thiserror::Error;
@@ -67,7 +68,6 @@ impl OpenMohaaActivity {
         }
     }
 
-    #[cfg(any(windows, test))]
     const fn checked() -> Self {
         Self {
             checked: true,
@@ -75,7 +75,6 @@ impl OpenMohaaActivity {
         }
     }
 
-    #[cfg(any(windows, test))]
     fn observe(&mut self, program: OpenMohaaProgram) {
         if !self.running.contains(&program) {
             self.running.push(program);
@@ -105,13 +104,46 @@ impl ClientKind {
     }
 }
 
-/// Select `OpenMoHAA` when its executable exists, otherwise retain retail behavior.
+/// Select `OpenMoHAA` when its client or a product launcher exists, otherwise retain retail.
 #[must_use]
 pub fn detect_client(install_root: &Path) -> ClientKind {
-    if install_root.join("openmohaa.exe").is_file() {
+    if openmohaa_is_installed(install_root) {
         ClientKind::OpenMohaa
     } else {
         ClientKind::Retail
+    }
+}
+
+/// Whether this folder has a playable `OpenMoHAA` client, not only `openmohaa.exe`.
+///
+/// Official archives install the Windows client as `openmohaa.exe` and every Unix archive as
+/// the extensionless `openmohaa` binary plus `launch_openmohaa_*` helpers
+/// (`reveille_core::platform::openmohaa::RELEASE_EXECUTABLE_STEMS`). A dedicated server alone
+/// is not enough: that is not a client the player can join with.
+#[must_use]
+pub fn openmohaa_is_installed(install_root: &Path) -> bool {
+    openmohaa_client_markers().any(|name| install_root.join(name).is_file())
+}
+
+fn openmohaa_client_markers() -> impl Iterator<Item = &'static str> {
+    [
+        "openmohaa.exe",
+        "openmohaa",
+        "launch_openmohaa_base",
+        "launch_openmohaa_base.exe",
+        "launch_openmohaa_spearhead",
+        "launch_openmohaa_spearhead.exe",
+        "launch_openmohaa_breakthrough",
+        "launch_openmohaa_breakthrough.exe",
+    ]
+    .into_iter()
+}
+
+fn openmohaa_unix_launcher(target: TargetGame) -> &'static str {
+    match target {
+        TargetGame::AlliedAssault => "launch_openmohaa_base",
+        TargetGame::Spearhead => "launch_openmohaa_spearhead",
+        TargetGame::Breakthrough => "launch_openmohaa_breakthrough",
     }
 }
 
@@ -133,7 +165,7 @@ fn tasklist_command() -> Command {
     command
 }
 
-/// Conservatively report whether a Windows `OpenMoHAA` installation can be replaced.
+/// Conservatively report whether an `OpenMoHAA` installation can be replaced.
 ///
 /// A failed or unavailable process query is `Unknown`, never evidence that the client stopped.
 #[must_use]
@@ -153,10 +185,58 @@ pub fn openmohaa_activity() -> OpenMohaaActivity {
         }
         tasklist_release_activity(&String::from_utf8_lossy(&output.stdout))
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        // `ps -ax -o comm=` is available on both macOS and Linux. The `=` suppresses the header,
+        // so every non-empty line is a command name. A failed spawn or non-zero status is
+        // Unknown, never ConfirmedStopped.
+        let Ok(output) = Command::new("ps").args(["-ax", "-o", "comm="]).output() else {
+            return OpenMohaaActivity::unknown();
+        };
+        if !output.status.success() {
+            return OpenMohaaActivity::unknown();
+        }
+        unix_comm_release_activity(&String::from_utf8_lossy(&output.stdout))
+    }
+    #[cfg(not(any(windows, unix)))]
     {
         OpenMohaaActivity::unknown()
     }
+}
+
+fn classify_release_stem(stem: &str) -> Option<OpenMohaaProgram> {
+    match stem {
+        "openmohaa" => Some(OpenMohaaProgram::Game),
+        "omohaaded" => Some(OpenMohaaProgram::DedicatedServer),
+        "launch_openmohaa_base"
+        | "launch_openmohaa_spearhead"
+        | "launch_openmohaa_breakthrough" => Some(OpenMohaaProgram::Launcher),
+        _ => None,
+    }
+}
+
+/// Unix `ps -o comm` truncates to 15 characters on Linux. Every `OpenMoHAA` launcher stem is
+/// longer than that and shares the prefix `launch_openmohaa`; `openmohaa` and `omohaaded` fit.
+#[cfg(any(unix, test))]
+fn classify_process_comm(comm: &str) -> Option<OpenMohaaProgram> {
+    let name = Path::new(comm)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(comm);
+    let stem = name
+        .strip_suffix(".exe")
+        .unwrap_or(name)
+        .to_ascii_lowercase();
+    if let Some(program) = classify_release_stem(&stem) {
+        return Some(program);
+    }
+    openmohaa::RELEASE_EXECUTABLE_STEMS
+        .iter()
+        .find_map(|known| {
+            (stem.len() >= 15 && known.len() > stem.len() && known.starts_with(&stem))
+                .then(|| classify_release_stem(known))
+                .flatten()
+        })
 }
 
 /// Does any listed process hold one of the executables a release archive overwrites?
@@ -172,23 +252,31 @@ fn tasklist_release_activity(output: &str) -> OpenMohaaActivity {
     // `tasklist_image_name` lowercases, so this also matches a row spelled `OMohAADed.EXE`.
     for image in output.lines().filter_map(tasklist_image_name) {
         valid_rows += 1;
-        let Some(stem) = image.strip_suffix(".exe").map(str::to_owned) else {
+        let Some(stem) = image.strip_suffix(".exe") else {
             continue;
         };
-        if !openmohaa::RELEASE_EXECUTABLE_STEMS.contains(&stem.as_str()) {
-            continue;
-        }
-        match stem.as_str() {
-            "openmohaa" => activity.observe(OpenMohaaProgram::Game),
-            "omohaaded" => activity.observe(OpenMohaaProgram::DedicatedServer),
-            "launch_openmohaa_base"
-            | "launch_openmohaa_spearhead"
-            | "launch_openmohaa_breakthrough" => activity.observe(OpenMohaaProgram::Launcher),
-            _ => {}
+        if let Some(program) = classify_release_stem(stem) {
+            activity.observe(program);
         }
     }
     if !output.trim().is_empty() && valid_rows == 0 {
         return OpenMohaaActivity::unknown();
+    }
+    activity
+}
+
+/// Same lock set as [`tasklist_release_activity`], from `ps -ax -o comm=` lines.
+#[cfg(any(unix, test))]
+fn unix_comm_release_activity(output: &str) -> OpenMohaaActivity {
+    let mut activity = OpenMohaaActivity::checked();
+    for comm in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if let Some(program) = classify_process_comm(comm) {
+            activity.observe(program);
+        }
     }
     activity
 }
@@ -205,35 +293,91 @@ fn tasklist_image_name(line: &str) -> Option<String> {
 }
 
 /// Derive the product-specific executable within one identified installation.
+///
+/// Windows `OpenMoHAA` still launches `openmohaa.exe` and selects the product with
+/// `+set com_target_game`. Unix archives ship `launch_openmohaa_base` /
+/// `launch_openmohaa_spearhead` / `launch_openmohaa_breakthrough` for that job; those are
+/// preferred when present, with a fallback to the `openmohaa` binary so a folder that only has
+/// the client remains launchable.
 #[must_use]
 pub fn default_client(install_root: &Path, target: TargetGame, client: ClientKind) -> PathBuf {
-    let filename = match (client, target) {
-        (ClientKind::OpenMohaa, _) => "openmohaa.exe",
-        (ClientKind::Retail | ClientKind::Reborn, TargetGame::AlliedAssault) => "MOHAA.exe",
-        (ClientKind::Retail | ClientKind::Reborn, TargetGame::Spearhead) => "moh_spearhead.exe",
-        (ClientKind::Retail | ClientKind::Reborn, TargetGame::Breakthrough) => {
-            "moh_breakthrough.exe"
+    match client {
+        ClientKind::OpenMohaa => openmohaa_launch_program(install_root, target),
+        ClientKind::Retail | ClientKind::Reborn => {
+            let filename = match target {
+                TargetGame::AlliedAssault => "MOHAA.exe",
+                TargetGame::Spearhead => "moh_spearhead.exe",
+                TargetGame::Breakthrough => "moh_breakthrough.exe",
+            };
+            install_root.join(filename)
         }
-    };
-    install_root.join(filename)
+    }
 }
 
-/// Directory name `OpenMoHAA` appends to `%APPDATA%` for its home path.
+fn openmohaa_launch_program(install_root: &Path, target: TargetGame) -> PathBuf {
+    if cfg!(windows) {
+        return install_root.join("openmohaa.exe");
+    }
+    let launcher = install_root.join(openmohaa_unix_launcher(target));
+    let client = install_root.join("openmohaa");
+    if launcher.is_file() || !client.is_file() {
+        launcher
+    } else {
+        client
+    }
+}
+
+/// Directory name `OpenMoHAA` appends under the platform home root.
 ///
-/// `Sys_DefaultHomePath` (`sys_win32.c:97-120`) appends `com_homepath`, which is empty for a
-/// non-demo build (`common.c:1771`), and otherwise `HOMEPATH_NAME` — `"openmohaa"`
-/// (`q_shared.h:81`). The per-product `HOMEPATH_NAME_WIN_MOH*` defines beside it name `moh`,
-/// `mohta` and `mohtt` but are referenced nowhere in the engine; one home path serves all three
-/// target games, with `main`, `mainta` and `maintt` inside it.
+/// `Sys_DefaultHomePath` appends `com_homepath`, empty for a non-demo build (`common.c:1771`),
+/// and otherwise `HOMEPATH_NAME` — `"openmohaa"` (`q_shared.h:81`). Windows uses `%APPDATA%`
+/// (`sys_win32.c:97-120`); macOS uses `$HOME/Library/Application Support/` (`sys_unix.c:130-140`
+/// under `__APPLE__`); Linux uses `$XDG_DATA_HOME` or `$HOME/.local/share` (`sys_unix.c:194-205`).
+/// The per-product `HOMEPATH_NAME_WIN_MOH*` defines name `moh`, `mohta` and `mohtt` but are
+/// referenced nowhere in the engine; one home path serves all three target games, with `main`,
+/// `mainta` and `maintt` inside it.
 const OPENMOHAA_HOME_DIRECTORY: &str = "openmohaa";
 
 /// `OpenMoHAA`'s home path on this machine, when the environment names one.
 ///
 /// The engine searches this path in addition to the installation, whether or not Reveille writes
-/// there, and it wins over the installation for any file present in both.
+/// there, and it wins over the installation for any file present in both. Reveille does not pass
+/// `fs_homepath`; it follows this default so maps written as a fallback land where the engine
+/// already looks.
 #[must_use]
 pub fn openmohaa_home_root() -> Option<PathBuf> {
-    env::var_os("APPDATA").map(|app_data| PathBuf::from(app_data).join(OPENMOHAA_HOME_DIRECTORY))
+    #[cfg(windows)]
+    {
+        env::var_os("APPDATA")
+            .map(|app_data| PathBuf::from(app_data).join(OPENMOHAA_HOME_DIRECTORY))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        env::var_os("HOME").map(|home| {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join(OPENMOHAA_HOME_DIRECTORY)
+        })
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(xdg) = env::var_os("XDG_DATA_HOME") {
+            if !xdg.is_empty() {
+                return Some(PathBuf::from(xdg).join(OPENMOHAA_HOME_DIRECTORY));
+            }
+        }
+        env::var_os("HOME").map(|home| {
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join(OPENMOHAA_HOME_DIRECTORY)
+        })
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        None
+    }
 }
 
 /// The directories one target game reads **from the selected installation**, lowest precedence
@@ -296,7 +440,7 @@ pub struct InstallTarget {
     pub used_home_fallback: bool,
 }
 
-/// Probe the conventional install directory and apply the OpenMoHAA-only home fallback.
+/// Probe the conventional install directory and apply the `OpenMoHAA`-only home fallback.
 ///
 /// # Errors
 ///
@@ -419,7 +563,7 @@ pub enum PlatformError {
         source: io::Error,
     },
     /// `OpenMoHAA` fallback root is unavailable.
-    #[error("APPDATA is unavailable for the OpenMoHAA fallback")]
+    #[error("the OpenMoHAA home path is unavailable")]
     MissingAppData,
     /// `OpenMoHAA` home directory could not be prepared.
     #[error("could not prepare OpenMoHAA home target {path}")]
@@ -464,6 +608,27 @@ mod tests {
 
         fs::write(temporary.path().join("openmohaa.exe"), []).expect("client marker");
         assert_eq!(detect_client(temporary.path()), ClientKind::OpenMohaa);
+    }
+
+    #[test]
+    fn detects_openmohaa_from_the_unix_client_or_a_launcher() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        assert_eq!(detect_client(root), ClientKind::Retail);
+
+        fs::write(root.join("openmohaa"), []).expect("unix client");
+        assert_eq!(detect_client(root), ClientKind::OpenMohaa);
+        fs::remove_file(root.join("openmohaa")).expect("remove unix client");
+
+        fs::write(root.join("launch_openmohaa_base"), []).expect("unix launcher");
+        assert_eq!(detect_client(root), ClientKind::OpenMohaa);
+        fs::remove_file(root.join("launch_openmohaa_base")).expect("remove unix launcher");
+
+        fs::write(root.join("launch_openmohaa_spearhead.exe"), []).expect("windows launcher");
+        assert_eq!(detect_client(root), ClientKind::OpenMohaa);
+        fs::write(root.join("omohaaded"), []).expect("dedicated server is not a client");
+        fs::remove_file(root.join("launch_openmohaa_spearhead.exe")).expect("remove launcher");
+        assert_eq!(detect_client(root), ClientKind::Retail);
     }
 
     #[test]
@@ -522,6 +687,37 @@ mod tests {
     }
 
     #[test]
+    fn unix_process_list_matches_bare_names_paths_and_truncated_comms() {
+        let running = unix_comm_release_activity(
+            "zsh\n\
+             /opt/OpenMoHAA/openmohaa\n\
+             launch_openmoha\n\
+             omohaaded\n",
+        );
+        assert_eq!(
+            running.running_programs(),
+            &[
+                OpenMohaaProgram::Game,
+                OpenMohaaProgram::Launcher,
+                OpenMohaaProgram::DedicatedServer
+            ]
+        );
+        assert_eq!(
+            unix_comm_release_activity("zsh\nfinder\n").client_activity(),
+            ClientActivity::ConfirmedStopped
+        );
+        assert_eq!(
+            unix_comm_release_activity("openmohaa.bak\nnot-openmohaa\n").client_activity(),
+            ClientActivity::ConfirmedStopped
+        );
+        assert_eq!(
+            classify_process_comm("launch_openmohaa_breakthrough"),
+            Some(OpenMohaaProgram::Launcher)
+        );
+        assert_eq!(classify_process_comm("open"), None);
+    }
+
+    #[test]
     fn selects_product_specific_retail_executable() {
         let root = Path::new(r"C:\Games\MOHAA");
 
@@ -538,14 +734,55 @@ mod tests {
             root.join("moh_breakthrough.exe")
         );
         assert_eq!(
-            default_client(root, TargetGame::AlliedAssault, ClientKind::OpenMohaa),
-            root.join("openmohaa.exe")
-        );
-        assert_eq!(
             default_client(root, TargetGame::AlliedAssault, ClientKind::Reborn),
             root.join("MOHAA.exe")
         );
         assert_eq!(ClientKind::Reborn.dialect(), LaunchDialect::Retail);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_openmohaa_launches_openmohaa_exe() {
+        let root = Path::new(r"C:\Games\MOHAA");
+        assert_eq!(
+            default_client(root, TargetGame::Spearhead, ClientKind::OpenMohaa),
+            root.join("openmohaa.exe")
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_openmohaa_launches_the_product_helper() {
+        let root = Path::new("/games/mohaa");
+        assert_eq!(
+            default_client(root, TargetGame::AlliedAssault, ClientKind::OpenMohaa),
+            root.join("launch_openmohaa_base")
+        );
+        assert_eq!(
+            default_client(root, TargetGame::Spearhead, ClientKind::OpenMohaa),
+            root.join("launch_openmohaa_spearhead")
+        );
+        assert_eq!(
+            default_client(root, TargetGame::Breakthrough, ClientKind::OpenMohaa),
+            root.join("launch_openmohaa_breakthrough")
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_openmohaa_falls_back_to_the_client_when_the_launcher_is_absent() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        fs::write(root.join("openmohaa"), b"client").expect("unix client");
+        assert_eq!(
+            default_client(root, TargetGame::Spearhead, ClientKind::OpenMohaa),
+            root.join("openmohaa")
+        );
+        fs::write(root.join("launch_openmohaa_spearhead"), b"launcher").expect("launcher");
+        assert_eq!(
+            default_client(root, TargetGame::Spearhead, ClientKind::OpenMohaa),
+            root.join("launch_openmohaa_spearhead")
+        );
     }
 
     #[test]

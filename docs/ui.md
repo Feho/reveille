@@ -303,7 +303,7 @@ Change a rule in the register first, then update the right-hand column here.
 | **H5** · Never imply the release digest proves publisher authenticity | Visible setup copy promises only that Reveille checks whether the download arrived intact; it never calls the file safe or the publisher verified. The release page's exact file check is optional tooltip detail, not newcomer-facing copy. |
 | **H6** · Never state a cause that was not observed | Engine failures are classified in Rust (`OpenMohaaFailureKind`), and since 27 Aug 2026 so are sweep failures (`BrowseFailureKind`: `NoNetwork`, `MasterUnreachable`, `MasterUnreadable`, `Internal`) — never by matching message text in the shell. `NoNetwork` is reserved for local routing, address, or permission failures; a TCP refusal or reset by the remote master is `MasterUnreachable`, never evidence that the player's PC is offline. A per-map catalogue non-result renders as a sentence rather than through `{:?}`. A release that publishes no file check was never downloaded and says so; only a size or digest mismatch may say the download did not arrive intact. An unclassified failure shows its own text rather than borrowing a cause. The original message stays as tooltip detail. |
 | **C3** · Never auto-apply an ambiguous match | Choice radios start with **nothing selected**. The total excludes unresolved maps and the pane says how many still need a choice. |
-| **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\openmohaa\<game directory>` path, not a euphemism. |
+| **H8** · Say where files went | `used_home_fallback` prints the real `%APPDATA%\openmohaa\<game directory>` or `~/Library/Application Support/openmohaa/<game directory>` path, not a euphemism. |
 | **H13** · Index the whole search path | An expansion session indexes `main` underneath `mainta` or `maintt`, so a base-game map is never reported as missing on a Spearhead or Breakthrough server. |
 | **H14** · Never offer a game the folder has no files for | The **Game** switch lists only the products detected in the folder, and is hidden entirely when there is one. |
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
@@ -487,8 +487,9 @@ platform v1 supports.
   before. The
   transfer is long enough for a player to start the game inside it, and a stale reading turns an
   honest request to close that program into a locked-file error part-way through the apply. The
-  probe covers every executable a release archive replaces, not only `openmohaa.exe` — a running
-  dedicated server holds the same files. Copy distinguishes the game, server and launcher from the
+  probe covers every executable a release archive replaces, not only `openmohaa.exe` — the Unix
+  `openmohaa` binary and `launch_openmohaa_*` helpers hold the same files, and a running
+  dedicated server does too. Copy distinguishes the game, server and launcher from the
   process name; it does not call a dedicated server the game.
 
 ### Re-rendering must not steal the caret

@@ -52,10 +52,10 @@ sources:
     node tools/check-sources.mjs
 
 # ---------------------------------------------------------------------------
-# Portability. `reveille-core` and `reveille-cli` must keep building and passing off Windows —
-# that is what makes the deferred Linux and macOS builds deferred rather than precluded
-# (docs/plan.md, "Cross-platform posture"). Running these on Windows will not prove a non-Windows
-# target, but it does catch an accidental dependency on `reveille-platform` or on `winreg`.
+# Portability. `reveille-core`, `reveille-cli`, and `reveille-platform` must keep building off
+# Windows — that is what makes the macOS OpenMoHAA overlay (and a later Linux shell) deferred
+# rather than precluded (docs/plan.md, "Cross-platform posture"). Running these on Windows will
+# not prove a non-Windows target, but it does catch an accidental `winreg` dependency in core.
 # ---------------------------------------------------------------------------
 
 # The ubuntu CI leg.
@@ -63,11 +63,11 @@ portable: portable-test portable-lint fmt-check
 
 # Test only the crates that must build off Windows.
 portable-test:
-    cargo test -p reveille-core -p reveille-cli --locked
+    cargo test -p reveille-core -p reveille-cli -p reveille-platform --locked
 
 # Lint only the crates that must build off Windows.
 portable-lint:
-    cargo clippy -p reveille-core -p reveille-cli --all-targets --locked -- -D warnings
+    cargo clippy -p reveille-core -p reveille-cli -p reveille-platform --all-targets --locked -- -D warnings
 
 # ---------------------------------------------------------------------------
 # Live checks. Never part of `just check`: a network call must never reach a default test
@@ -108,9 +108,14 @@ app:
 app-release:
     cargo run -p reveille-app --release
 
-# Produce the installer. Needs the npm dev dependency: `cd crates/reveille-app && npm install`.
+# Produce the Windows NSIS installer. Needs the npm dev dependency: `cd crates/reveille-app && npm install`.
+# NSIS does not run on macOS; use `just bundle-macos` there.
 bundle:
-    cd crates/reveille-app && npm run tauri build
+    cd crates/reveille-app && npx -- tauri build --bundles nsis
+
+# Produce Reveille.app and a .dmg. Must be run on macOS; this is not an NSIS installer.
+bundle-macos:
+    cd crates/reveille-app && npx -- tauri build --bundles app dmg
 
 # Generate the updater key once; an empty password is valid, and the private key needs backup.
 updater-key-generate KEY:

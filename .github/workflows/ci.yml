@@ -7,9 +7,10 @@ on:
   pull_request:
 
 jobs:
-  # The portable half. `reveille-core` and `reveille-cli` must keep building and
-  # passing on a non-Windows target, which is what makes the deferred Linux and
-  # macOS builds deferred rather than precluded.
+  # The portable half. `reveille-core`, `reveille-cli`, and `reveille-platform`
+  # must keep building off Windows so the macOS OpenMoHAA overlay (and a later
+  # Linux shell) stay deferred rather than precluded. The Tauri shell is not
+  # built here: Linux would need GTK/WebKit, and a .dmg is produced on a Mac.
   portable:
     runs-on: ubuntu-latest
     steps:
@@ -18,14 +19,12 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p reveille-core -p reveille-cli --locked
-      - run: cargo clippy -p reveille-core -p reveille-cli --all-targets --locked -- -D warnings
+      - run: cargo test -p reveille-core -p reveille-cli -p reveille-platform --locked
+      - run: cargo clippy -p reveille-core -p reveille-cli -p reveille-platform --all-targets --locked -- -D warnings
       - run: cargo fmt --all --check
 
-  # The whole workspace, including the Tauri shell. `reveille-app` is a
-  # Windows-targeted crate for v1; building it on Linux would need the GTK and
-  # WebKit development packages, which buys nothing until a Linux build is in
-  # scope.
+  # The whole workspace, including the Tauri shell. Packaging a macOS .app/.dmg
+  # still needs a Mac; this job is the Windows NSIS target.
   windows:
     runs-on: windows-latest
     steps:

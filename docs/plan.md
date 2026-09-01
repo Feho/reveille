@@ -294,6 +294,14 @@ digest arrives from the same origin as the download, so it defends against corru
 CDN edge, not against a compromised GitHub account. Asset selection is an `(os, arch)` → asset
 name mapping, which is portable logic and belongs in the core crate, not the platform layer.
 
+**macOS OpenMoHAA overlay, 1 Sep 2026.** The Windows-only v1 *shipping* decision stands: GitHub
+Releases still attach NSIS, and there is no Apple notarisation. What is no longer deferred is
+installing the official `macos-multiarch-arm64-x86_64` zip into a user-picked folder that already
+has `main/` (the original pk3s stay), launching `launch_openmohaa_*` rather than
+`openmohaa.exe`, and treating `~/Library/Application Support/openmohaa` as the home path. The
+Tauri bundle list includes `app` and `dmg`; those are built on a Mac with `just bundle-macos`,
+not by the Windows release workflow. NSIS is not a Mac installer.
+
 ## Milestone 5 — Windows platform layer *(split)*
 
 - Install discovery: registry `Uninstall` keys, GOG Galaxy manifests, **EA App / Origin**

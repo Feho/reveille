@@ -5,9 +5,12 @@
 Reveille is a newcomer-first launcher for Medal of Honor: Allied Assault and its two
 expansions, Spearhead and Breakthrough. The current Windows v1 identifies an existing
 installation, browses servers answering now, checks their map rotations, safely installs exact
-missing-map matches, and launches retail MOHAA or OpenMoHAA. The reusable pipeline lives in
-`reveille-core`; both the CLI proof and Tauri desktop shell call it directly, while
-`reveille-platform` holds their shared Windows write-target and process-launch policy.
+missing-map matches, and launches retail MOHAA or OpenMoHAA. On macOS the same overlay installs
+the official OpenMoHAA engine **into** a folder that already contains the original `main/`
+(and `mainta`/`maintt`) pk3s — it does not replace or delete those files — then launches
+`launch_openmohaa_base`, `launch_openmohaa_spearhead`, or `launch_openmohaa_breakthrough`.
+The reusable pipeline lives in `reveille-core`; both the CLI proof and Tauri desktop shell call
+it directly, while `reveille-platform` holds their shared write-target and process-launch policy.
 
 Each game has its own server list and its own content directory: Allied Assault reads `main`,
 Spearhead reads `main` and then `mainta`, Breakthrough reads `main` and then `maintt`. The app
@@ -54,6 +57,40 @@ the download. The signing route is decided — SignPath Foundation's free certif
 projects — but the application follows the first release rather than preceding it; `docs/plan.md`
 records why, and what the certificate does and does not change. winget manifests remain shipping
 work outside v1.
+
+## Run on macOS
+
+Reveille does **not** ship the original game. You still need a legal copy of Allied Assault (and
+Spearhead / Breakthrough if you play those), with the original pk3s in `main/` (and `mainta` /
+`maintt`). Pick that folder in the app. Install OpenMoHAA overlays the official
+`openmohaa-v*-macos-multiarch-arm64-x86_64.zip` from
+[openmoh/openmohaa releases](https://github.com/openmoh/openmohaa/releases) **on top of** that
+folder: engine binaries are added or replaced, game data is left alone. Config and extra maps that
+cannot be written into the game folder go to `~/Library/Application Support/openmohaa`, which is
+the engine's default home path (`sys_unix.c` under `__APPLE__`). Reveille does not pass
+`fs_homepath`.
+
+GitHub Actions still publishes only the Windows NSIS installer (`Reveille_*_x64-setup.exe`). NSIS
+does not run on a Mac. Build the app on macOS:
+
+```console
+cd crates/reveille-app && npm install
+just bundle-macos
+```
+
+That is `npx tauri build --bundles app dmg`. It produces `Reveille.app` and a `.dmg` under
+`target/release/bundle/`. `cargo run -p reveille-app` is the development build, same as Windows.
+
+**Gatekeeper.** Neither Reveille nor the OpenMoHAA zip is notarized (that needs an Apple Developer
+certificate). After a browser or GitHub download, macOS may quarantine the files. If the app or
+game will not start, clear quarantine on **your** copies:
+
+```console
+xattr -dr com.apple.quarantine /Applications/Reveille.app
+xattr -dr com.apple.quarantine /path/to/your/MOHAA
+```
+
+That is a local workaround, not notarisation. Do not run it on files you do not trust.
 
 ## Prove Journey B in one command
 

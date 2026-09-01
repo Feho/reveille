@@ -142,7 +142,7 @@ pub fn inventory(root: &Path) -> EngineInventory {
             || (root.join(name).is_file()
                 && hash_file(&root.join(name)).ok().as_deref() != expected_executable_sha256(name))
     });
-    let openmohaa_installed = root.join("openmohaa.exe").is_file();
+    let openmohaa_installed = crate::openmohaa_is_installed(root);
     let receipt_valid = state
         .as_ref()
         .and_then(|state| state.reborn.as_ref())
@@ -573,6 +573,18 @@ mod tests {
             resolve_choice(root, None),
             Err(EngineError::SavedChoiceUnavailable(EngineChoice::Openmohaa))
         ));
+    }
+
+    #[test]
+    fn inventory_counts_the_unix_openmohaa_client() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        assert!(!inventory(root).openmohaa_installed);
+        fs::write(root.join("openmohaa"), b"unix").expect("unix client");
+        assert!(inventory(root).openmohaa_installed);
+        fs::remove_file(root.join("openmohaa")).expect("remove unix client");
+        fs::write(root.join("launch_openmohaa_base"), b"launcher").expect("launcher");
+        assert!(inventory(root).openmohaa_installed);
     }
 
     #[test]

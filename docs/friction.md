@@ -105,7 +105,8 @@ outranks the install directory in the search path (`files.cpp:3245-3257`) — bu
 installs land in Program Files is not measured.** GOG's standalone installer defaults to
 `C:\GOG Games\…`, which needs no elevation, so this may be rarer than it feels.
 **What Reveille does** Probes writability rather than inferring it from the path string, falls
-back to `%APPDATA%\openmohaa\<game directory>` on OpenMoHAA, and prints the real destination. Never raises a UAC
+back to `%APPDATA%\openmohaa\<game directory>` on Windows OpenMoHAA, or
+`~/Library/Application Support/openmohaa/<game directory>` on macOS, and prints the real destination. Never raises a UAC
 prompt mid-journey. On retail there is no home path, so an unwritable folder is reported as a
 real blocker instead of being worked around.
 **Status** Shipped.
