@@ -254,7 +254,7 @@ function prerequisite() {
     el(
       "p",
       null,
-      "Reveille needs the game files from your own copy of Medal of Honor: a disc install, GOG, Steam or the EA App.",
+      "Reveille needs the game files from your own copy of Medal of Honor: a disc install, GOG or the EA App.",
     ),
     el(
       "p",
