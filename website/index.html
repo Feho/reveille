@@ -1,0 +1,310 @@
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Reveille is a Windows server browser and launcher for Medal of Honor: Allied Assault, Spearhead and Breakthrough."
+    />
+    <meta name="theme-color" content="#090b0e" />
+    <meta property="og:title" content="Reveille — Find a server. Get the maps. Play." />
+    <meta
+      property="og:description"
+      content="A newcomer-first launcher for Medal of Honor: Allied Assault and its expansions."
+    />
+    <meta property="og:type" content="website" />
+    <title>Reveille — Medal of Honor server browser and launcher</title>
+    <link rel="icon" href="assets/icon.ico" sizes="any" />
+    <link rel="preload" href="assets/reveille-hero.png" as="image" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="script.js" type="module"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header" data-header>
+      <div class="shell header-inner">
+        <a class="brand" href="#top" aria-label="Reveille home">
+          <svg class="brand-mark" viewBox="0 0 42 42" aria-hidden="true">
+            <path d="M4 7l15 7v7L4 14zM38 7l-15 7v7l15-7zM7 18l12 6v7L7 25zM35 18l-12 6v7l12-6zM17 7l4 2 4-2-4 28z" />
+          </svg>
+          <span>Reveille</span>
+        </a>
+
+        <button
+          class="nav-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="primary-nav"
+          data-nav-toggle
+        >
+          <span class="sr-only">Open menu</span>
+          <span></span><span></span><span></span>
+        </button>
+
+        <nav class="primary-nav" id="primary-nav" aria-label="Primary" data-nav>
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#games">Games</a>
+          <a href="#faq">FAQ</a>
+          <a href="https://github.com/MOHCentral/reveille" rel="noreferrer">GitHub</a>
+        </nav>
+
+        <div class="header-actions">
+          <span class="version-chip">v0.1.2 · Windows</span>
+          <a class="button button--small" href="https://github.com/MOHCentral/reveille/releases/download/v0.1.2/Reveille_0.1.2_x64-setup.exe">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" />
+            </svg>
+            Download
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-art" aria-hidden="true"></div>
+        <div class="hero-shade" aria-hidden="true"></div>
+
+        <div class="shell hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow"><span>Allied Assault</span><i></i><span>Spearhead</span><i></i><span>Breakthrough</span></p>
+            <h1 id="hero-title">
+              Less hunting.<br />
+              <em>More MOHAA.</em>
+            </h1>
+            <p class="hero-lede">
+              Reveille finds your game, sets up the engine you choose, shows servers that answer,
+              and gets matching custom maps from moh-db before launch.
+            </p>
+
+            <div class="hero-actions">
+              <a class="button button--large" href="https://github.com/MOHCentral/reveille/releases/download/v0.1.2/Reveille_0.1.2_x64-setup.exe">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" />
+                </svg>
+                <span>
+                  <strong>Download for Windows</strong>
+                  <small>v0.1.2 · 64-bit · 3.4 MB</small>
+                </span>
+              </a>
+              <a class="source-link" href="https://github.com/MOHCentral/reveille" rel="noreferrer">
+                View source
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7m0 0H9m8 0v8" /></svg>
+              </a>
+            </div>
+
+            <div class="trust-row" aria-label="Release facts">
+              <span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-2.8 8-7 10-4.2-2-7-5.5-7-10V6zM9 12l2 2 4-5" /></svg>
+                GPL-2.0 open source
+              </span>
+              <span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M8 7h8M8 17h8" /></svg>
+                Installs without Administrator rights
+              </span>
+              <span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 4v.01M3 20h18L12 4z" /></svg>
+                Unsigned build — Windows may warn
+              </span>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="shell preview-wrap">
+          <div class="feature-rail">
+            <article>
+              <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l10 4v8c0 6-4 11-10 14C10 26 6 21 6 15V7zM11 11h10m-10 5h10m-7 5h4" /></svg>
+              <div><strong>Engine setup</strong><span>Choose Original, OpenMoHAA or Reborn. Reveille installs what your choice needs.</span></div>
+            </article>
+            <article>
+              <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="11" /><path d="M16 7v4m0 10v4M7 16h4m10 0h4M11 11l3 3m4 4 3 3m0-10-3 3m-4 4-3 3" /></svg>
+              <div><strong>Answering servers</strong><span>Browse, search and filter servers that replied.</span></div>
+            </article>
+            <article>
+              <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 27s-9-5.3-9-13a5 5 0 019-3 5 5 0 019 3c0 7.7-9 13-9 13zM8 27h16M11 23v6m10-6v6" /></svg>
+              <div><strong>Favorites &amp; history</strong><span>Save favorites and return to past launches.</span></div>
+            </article>
+            <article>
+              <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M10 23H8a6 6 0 010-12 9 9 0 0117-2 6 6 0 01-1 12h-2M16 14v14m0 0-5-5m5 5 5-5" /></svg>
+              <div><strong>Auto map download</strong><span>Gets matching maps from moh-db before launch.</span></div>
+            </article>
+            <article>
+              <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" /><path d="M13 10l9 6-9 6z" /></svg>
+              <div><strong>Launch from the list</strong><span>Starts your chosen engine on that server.</span></div>
+            </article>
+          </div>
+
+          <figure class="app-screenshot">
+            <a href="assets/reveille-app-preview.png" target="_blank" rel="noreferrer">
+              <img
+                src="assets/reveille-app-preview.png"
+                width="1197"
+                height="760"
+                alt="Reveille showing an Allied Assault server list beside the selected server's map check and download choices"
+              />
+              <span>Open full preview <b aria-hidden="true">↗</b></span>
+            </a>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section section--features" id="features" aria-labelledby="features-title">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="kicker">Built around the blockers</p>
+            <h2 id="features-title">From installed game<br />to launched server.</h2>
+            <p>Reveille brings engine setup, server discovery and missing maps into one place.</p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card feature-card--wide">
+              <div class="feature-number">01</div>
+              <div>
+                <span class="label">Server browser</span>
+                <h3>Find the servers that answer.</h3>
+                <p>Reveille checks registered servers and lists the replies. Search and filter the results, star favorites, or return to servers from your launch history.</p>
+              </div>
+              <div class="radar" aria-hidden="true"><i></i><i></i><i></i><span></span></div>
+            </article>
+            <article class="feature-card">
+              <div class="feature-number">02</div>
+              <span class="label">Know before launch</span>
+              <h3>See what the server needs.</h3>
+              <p>Reveille compares your install with the map running now and any published rotation, then shows what is missing and how much there is to download.</p>
+              <div class="mini-list" aria-hidden="true"><span><i class="on-disk"></i>dm/mohdm6 <b>on disk</b></span><span><i class="to-get"></i>obj/final_objective <b>4.8 MB</b></span><span><i class="to-get"></i>dm/ravine <b>13.6 MB</b></span></div>
+            </article>
+            <article class="feature-card">
+              <div class="feature-number">03</div>
+              <span class="label">Get missing maps</span>
+              <h3>Maps from moh-db, without the hunt.</h3>
+              <p>Reveille finds matching packages on moh-db, checks each archive and installs unambiguous matches where the game loads them. If several files could match, you choose.</p>
+              <div class="package" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 10l11-6 11 6-11 6zM5 10v12l11 6 11-6V10M16 16v12" /></svg><span>2 maps · 18.4 MB</span><i></i></div>
+            </article>
+            <article class="feature-card feature-card--wide feature-card--launch">
+              <div class="feature-number">04</div>
+              <div>
+                <span class="label">Engine setup and launch</span>
+                <h3>Choose an engine. Reveille sets it up.</h3>
+                <p>Keep the Original game or choose OpenMoHAA or Reborn. Reveille installs the current supported build when needed, remembers your choice and starts it with the selected server.</p>
+              </div>
+              <span class="launch-button" aria-hidden="true">Join <b>▶</b></span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--steps" id="how-it-works" aria-labelledby="steps-title">
+        <div class="shell steps-layout">
+          <div class="section-heading section-heading--sticky">
+            <p class="kicker">How it works</p>
+            <h2 id="steps-title">From game folder to launch.</h2>
+            <p>Reveille works with the game files you own and handles the setup around them. It does not include EA game data.</p>
+            <div class="requirement">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5m0 4v.01M3 20h18L12 4z" /></svg>
+              <p><strong>You need Medal of Honor installed.</strong><br />Install Allied Assault from disc, EA App or GOG first.</p>
+            </div>
+          </div>
+
+          <ol class="steps">
+            <li><span>1</span><div><h3>Find your game</h3><p>Reveille checks common Windows locations. If it misses yours, choose the folder.</p></div></li>
+            <li><span>2</span><div><h3>Choose your engine</h3><p>Keep Original or choose OpenMoHAA or Reborn. Reveille installs the supported build when needed and remembers your choice.</p></div></li>
+            <li><span>3</span><div><h3>Pick a server</h3><p>Browse servers that answered. Search, filter, star favorites, or use History to return to a previous launch.</p></div></li>
+            <li><span>4</span><div><h3>Get the maps and launch</h3><p>Reveille checks the current map and any published rotation, shows the download size, gets matching moh-db packages where available, then starts the game.</p></div></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section section--games" id="games" aria-labelledby="games-title">
+        <div class="shell">
+          <div class="section-heading section-heading--center">
+            <p class="kicker">All three games</p>
+            <h2 id="games-title">One launcher. Three server lists.</h2>
+            <p>Allied Assault, Spearhead and Breakthrough are scanned separately, and missing maps go to the folder each game uses.</p>
+          </div>
+          <div class="game-grid">
+            <article><span>2002</span><div class="game-stripes"></div><h3>Allied Assault</h3><p>The original release, with its own server scan and map check.</p></article>
+            <article><span>2002</span><div class="game-stripes"></div><h3>Spearhead</h3><p>The first expansion, scanned and checked separately.</p></article>
+            <article><span>2003</span><div class="game-stripes"></div><h3>Breakthrough</h3><p>The second expansion, scanned and checked separately.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section--faq" id="faq" aria-labelledby="faq-title">
+        <div class="shell faq-layout">
+          <div class="section-heading">
+            <p class="kicker">Field notes</p>
+            <h2 id="faq-title">Before you download.</h2>
+          </div>
+          <div class="faq-list">
+            <details>
+              <summary>Does Reveille include Medal of Honor?</summary>
+              <p>No. You need a legitimate Allied Assault installation. Reveille identifies and works with your existing game files; it never redistributes EA assets.</p>
+            </details>
+            <details>
+              <summary>Do I need to find patched binaries myself?</summary>
+              <p>No. Keep the Original game or install OpenMoHAA or Reborn from Reveille. It gets the current supported package, checks that the download arrived intact and remembers which engine to launch.</p>
+            </details>
+            <details>
+              <summary>Where do the missing maps come from?</summary>
+              <p>Reveille searches moh-db.com for matching packages. It installs an unambiguous match when you approve the download, asks you when several files could fit, and says when no download is listed.</p>
+            </details>
+            <details>
+              <summary>Can I save a server?</summary>
+              <p>Yes. Star servers as Favorites, search and filter the current list, or use History to revisit servers Reveille previously launched.</p>
+            </details>
+            <details>
+              <summary>Does it need Administrator rights?</summary>
+              <p>The Reveille installer is per-user and does not need Administrator rights. Writing maps into some protected retail game folders can still be blocked by Windows; Reveille reports that instead of raising a surprise UAC prompt.</p>
+            </details>
+            <details>
+              <summary>Why might Windows show a warning?</summary>
+              <p>The current release is not code-signed, so Windows names no publisher and SmartScreen may hold the download. The release page publishes the installer’s SHA-256 for checking download integrity.</p>
+            </details>
+            <details>
+              <summary>Does “answered” mean I can get in?</summary>
+              <p>It means the server replied to a fresh status check. Reveille can check the map information it publishes and launch the game with its address, but the server still decides whether you get in.</p>
+            </details>
+            <details>
+              <summary>Is it open source?</summary>
+              <p>Yes. Reveille is licensed GPL-2.0-only. The source, issue tracker and release history are public on GitHub.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta" aria-labelledby="final-title">
+        <div class="final-cta__grid" aria-hidden="true"></div>
+        <div class="shell final-cta__inner">
+          <svg class="final-mark" viewBox="0 0 42 42" aria-hidden="true"><path d="M4 7l15 7v7L4 14zM38 7l-15 7v7l15-7zM7 18l12 6v7L7 25zM35 18l-12 6v7l12-6zM17 7l4 2 4-2-4 28z" /></svg>
+          <p class="kicker">Everything between install and launch</p>
+          <h2 id="final-title">Get back to MOHAA.</h2>
+          <p>Choose an engine, find a server that answers and get matching maps from one launcher.</p>
+          <a class="button button--large" href="https://github.com/MOHCentral/reveille/releases/download/v0.1.2/Reveille_0.1.2_x64-setup.exe">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" /></svg>
+            <span><strong>Download Reveille</strong><small>v0.1.2 · 64-bit · 3.4 MB</small></span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <a class="brand brand--small" href="#top" aria-label="Reveille home">
+          <svg class="brand-mark" viewBox="0 0 42 42" aria-hidden="true"><path d="M4 7l15 7v7L4 14zM38 7l-15 7v7l15-7zM7 18l12 6v7L7 25zM35 18l-12 6v7l12-6zM17 7l4 2 4-2-4 28z" /></svg>
+          <span>Reveille</span>
+        </a>
+        <p>Independent community software. Not affiliated with or endorsed by Electronic Arts.</p>
+        <nav aria-label="Footer">
+          <a href="https://github.com/MOHCentral/reveille">Source</a>
+          <a href="https://github.com/MOHCentral/reveille/issues">Issues</a>
+          <a href="https://github.com/MOHCentral/reveille/blob/main/LICENSE">GPL-2.0</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
