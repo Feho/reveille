@@ -124,6 +124,12 @@ bundle-updater KEY:
 bump-version VERSION *ARGS:
     node tools/bump-version.mjs "{{ VERSION }}" {{ ARGS }}
 
+# Bump, gate, commit and tag a release in one step. Pushing the tag stays manual; that push is
+# what starts the installer build. Add `--dry-run` to stop after validating, `--no-check` to skip
+# the gate.
+release VERSION *ARGS:
+    node tools/release.mjs "{{ VERSION }}" {{ ARGS }}
+
 # The headless pipeline. `just cli --help` lists the subcommands.
 cli *ARGS:
     cargo run -p reveille-cli -- {{ ARGS }}

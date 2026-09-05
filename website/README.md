@@ -6,7 +6,13 @@ The landing page is a dependency-free static site. Open `index.html` directly or
 directory with any static file server.
 
 The product preview is a captured application screenshot. Its server figures are a past snapshot,
-not a live server list. Release buttons point to the latest published GitHub release.
+not a live server list.
+
+No version is written into the page. Release buttons link to `releases/latest`, which is correct
+whatever the current release is, and `script.js` asks the GitHub API for the latest release to fill
+in the version, the installer size and a direct asset link. When that request fails — offline, or
+rate-limited — the page keeps the version-free wording rather than naming a release it cannot
+confirm.
 
 ## Deployment
 

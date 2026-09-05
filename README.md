@@ -47,7 +47,20 @@ just bump-version 0.1.2
 ```
 
 The recipe refuses an invalid or non-increasing semantic version and stops if the existing release
-identities already disagree. Add `--dry-run` to validate the change without writing it.
+identities already disagree. Add `--dry-run` to validate the change without writing it. Nothing in
+`website/` carries a version: the download buttons link to `releases/latest` and the page asks the
+GitHub API for the installer, so a release never leaves the site advertising an older one.
+
+To bump, gate, commit and tag in one step:
+
+```console
+just release 0.1.4
+```
+
+It refuses a dirty working tree or an existing tag, runs `just check` against the bumped tree, then
+commits the five versioned files and creates an annotated `v0.1.4`. Pushing stays manual, because
+the tag push is what starts the installer build; the recipe prints the two `git push` commands when
+it finishes. Add `--dry-run` to stop after the checks, or `--no-check` to skip the gate.
 
 **Builds are not code-signed yet.** Windows names no publisher for them and SmartScreen may hold
 the download. The signing route is decided — SignPath Foundation's free certificate for open-source
