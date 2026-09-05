@@ -40,27 +40,27 @@ installed release can accept future updates only from that key. To reproduce the
 installer and signature locally, run `just bundle-updater path/to/reveille.key`; leave the signing
 prompt empty for a key created without a password.
 
-Prepare a release version without updating Cargo, Tauri and npm independently:
-
-```console
-just bump-version 0.1.2
-```
-
-The recipe refuses an invalid or non-increasing semantic version and stops if the existing release
-identities already disagree. Add `--dry-run` to validate the change without writing it. Nothing in
-`website/` carries a version: the download buttons link to `releases/latest` and the page asks the
-GitHub API for the installer, so a release never leaves the site advertising an older one.
-
-To bump, gate, commit and tag in one step:
+Cut a release in one step:
 
 ```console
 just release 0.1.4
 ```
 
-It refuses a dirty working tree or an existing tag, runs `just check` against the bumped tree, then
-commits the five versioned files and creates an annotated `v0.1.4`. Pushing stays manual, because
-the tag push is what starts the installer build; the recipe prints the two `git push` commands when
-it finishes. Add `--dry-run` to stop after the checks, or `--no-check` to skip the gate.
+It refuses a dirty working tree or an existing tag before touching anything, updates the Cargo,
+Tauri and npm release identities together, runs `just check` against the bumped tree, then commits
+the five versioned files and creates an annotated `v0.1.4`. Pushing stays manual, because the tag
+push is what starts the installer build; the recipe prints the two `git push` commands when it
+finishes. Add `--dry-run` to stop after the checks, or `--no-check` to skip the gate.
+
+Nothing in `website/` carries a version: the download buttons link to `releases/latest` and the page
+asks the GitHub API for the installer, so a release never leaves the site advertising an older one.
+There is no website step to remember.
+
+`just bump-version 0.1.4` is the same version update on its own, without the gate, the commit or the
+tag. `just release` calls it, and it owns the rules both share: it refuses an invalid or
+non-increasing semantic version and stops if the existing release identities already disagree. Reach
+for it directly to validate a version (`--dry-run`) or when the bump belongs in a commit of its own
+making rather than in a tagged release commit.
 
 **Builds are not code-signed yet.** Windows names no publisher for them and SmartScreen may hold
 the download. The signing route is decided — SignPath Foundation's free certificate for open-source
