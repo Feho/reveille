@@ -1010,6 +1010,30 @@ digests and a `gameType` filter that filters. Distribution, packaging and the si
 decided above; the SignPath application itself, the winget manifest, and any Microsoft Store
 submission remain owner-run shipping work, outside v1.
 
+## Correction — the engine source moved to mohcentral/openmohaa with semver channels
+
+**Status: done.** The engine release channels originally read openmoh/openmohaa: stable from
+`/releases/latest`, preview from a fixed, force-moved `dev` tag. Two things were wrong with that
+once the fork became the source.
+
+The `dev` tag was mutable, so it had no version of its own. The code compensated by using the
+release *name* as the update identity (`MissingDevIdentity`) — a build label standing in for a
+version, which nothing could order. Immutable semver prerelease tags (`v0.83.0-rc.1`) remove the
+need for that hack: both channels now use `tag_name`, and the install receipt records a version
+that can actually be compared. `MissingDevIdentity` is gone.
+
+The upstream `dev` release also only shipped complete Windows builds inside its `-pdb.zip` assets,
+so `asset_suffix` carried a per-channel table. mohcentral/openmohaa publishes both channels from
+one tag-triggered workflow with identical asset names, so that table is now channel-free and the
+`-pdb.zip` archives are symbols only. This is a deliberate asymmetry that was **removed**, not one
+to preserve.
+
+What replaced the fixed tag is `/releases?per_page=30` plus semver selection — see rule H17 for
+why publication order could not be used, and why a preview player is offered the stable release
+once it outranks the newest candidate. Not yet done on the openmohaa side: the tag-triggered
+`publish-release.yml` workflow the asset-suffix comment cites does not exist yet, so the preview
+channel has nothing to select until mohcentral/openmohaa publishes its first semver prerelease.
+
 ## Follow-up, not blocking
 
 The PRD's BSP-checksum bullet describes that work as heavier than it proved to be. Worth

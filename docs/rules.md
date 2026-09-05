@@ -253,6 +253,25 @@ player's **Update and restart** action. Payload authenticity is the separate, st
 gate in S6: the release label is not what the updater signature covers. Test:
 `reveille-app::the_self_update_offer_is_explicit_and_keeps_the_checked_release`.
 
+### H17 · The engine channel is decided by semver precedence, never by publication order
+**Because** OpenMoHAA engine releases now carry immutable semver tags rather than a rolling `dev`
+tag. GitHub returns `/releases` in creation order, which puts a hotfix cut from an older branch
+ahead of a newer release candidate; taking the first entry would silently offer a player a *lower*
+version than the one they have. A tag is also not a channel: a release counts as a prerelease when
+its tag says so **or** GitHub's `prerelease` flag says so, so a publishing mistake in either place
+cannot leak an untested build into the stable channel.
+**Enforced at** `reveille-core/src/platform/openmohaa.rs` — `ReleaseVersion` implements semver
+precedence (§11.4), `parse_release_list` selects by `max_by` on the parsed version, drafts are
+excluded from both channels, and a non-semver tag is skipped rather than failing the channel for
+every player. The preview channel deliberately admits stable releases so a player on it is offered
+`v0.83.0` once it outranks `v0.83.0-rc.2` rather than being stranded on the candidate. Tests:
+`preview_channel_takes_the_highest_semver_release_not_the_newest_entry`,
+`stable_selection_from_a_list_skips_every_prerelease_and_draft`,
+`preview_channel_offers_a_stable_release_once_it_outranks_the_candidate`,
+`a_stable_tag_flagged_prerelease_stays_out_of_the_stable_channel`,
+`a_non_semver_tag_is_skipped_rather_than_failing_the_whole_channel`,
+`semver_precedence_orders_candidates_below_their_release`.
+
 ---
 
 ## S — Safety: what Reveille may do to a machine or a server

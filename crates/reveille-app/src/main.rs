@@ -249,6 +249,9 @@ struct OpenMohaaReleaseSummary {
     offer_id: OpenMohaaOfferId,
     channel: ReleaseChannel,
     version: String,
+    /// Whether the offered release is a prerelease. The preview channel serves the stable release
+    /// once it outranks the newest candidate, so the channel alone does not answer this.
+    prerelease: bool,
     asset_name: String,
     size: u64,
     digest: String,
@@ -382,7 +385,8 @@ impl From<OpenMohaaError> for OpenMohaaFailure {
             OpenMohaaError::MissingAsset(_) => Kind::NoAssetForHost,
             OpenMohaaError::MalformedRelease(_)
             | OpenMohaaError::AmbiguousAsset(_)
-            | OpenMohaaError::MissingDevIdentity
+            | OpenMohaaError::NoSelectableRelease(_)
+            | OpenMohaaError::UnversionedRelease(_)
             | OpenMohaaError::MissingDigest(_)
             | OpenMohaaError::UnsupportedDigest(_)
             | OpenMohaaError::InvalidDigest(_)
@@ -805,6 +809,7 @@ fn release_summary(
         offer_id,
         channel: package.channel,
         version: package.version.clone(),
+        prerelease: package.prerelease,
         asset_name: package.asset_name.clone(),
         size: package.size,
         digest: package.digest.to_string(),
@@ -1788,7 +1793,7 @@ mod tests {
     };
     use reveille_core::platform::openmohaa::{
         OpenMohaaError, PublishedSha256, ReleaseChannel, ReleasePackage, ReleaseSelector,
-        ReleaseTarget,
+        ReleaseTarget, ReleaseVersion,
     };
     use reveille_core::preflight::{MapResult, MapStatus, Report, Verdict};
     use tempfile::TempDir;
@@ -1974,6 +1979,8 @@ mod tests {
         let stable = ReleasePackage {
             channel: ReleaseChannel::Stable,
             version: "v0.82.1".to_owned(),
+            semver: ReleaseVersion::parse("v0.82.1").expect("stable semver"),
+            prerelease: false,
             asset_name: "stable.zip".to_owned(),
             download_url: "https://example.invalid/stable.zip".to_owned(),
             size: 6,
@@ -1983,8 +1990,10 @@ mod tests {
             .expect("stable digest"),
         };
         let preview = ReleasePackage {
-            channel: ReleaseChannel::Dev,
-            version: "preview commit".to_owned(),
+            channel: ReleaseChannel::Preview,
+            version: "v0.83.0-rc.1".to_owned(),
+            semver: ReleaseVersion::parse("v0.83.0-rc.1").expect("preview semver"),
+            prerelease: true,
             asset_name: "preview.zip".to_owned(),
             download_url: "https://example.invalid/preview.zip".to_owned(),
             size: 7,
@@ -2020,9 +2029,11 @@ mod tests {
         let root = temporary.path();
         fs::write(root.join("openmohaa.exe"), b"installed preview").expect("client fixture");
         let preview = ReleasePackage {
-            channel: ReleaseChannel::Dev,
-            version: "main-0123456789abcdef".to_owned(),
-            asset_name: "openmohaa-dev-windows-x64-pdb.zip".to_owned(),
+            channel: ReleaseChannel::Preview,
+            version: "v0.83.0-rc.1".to_owned(),
+            semver: ReleaseVersion::parse("v0.83.0-rc.1").expect("preview semver"),
+            prerelease: true,
+            asset_name: "openmohaa-v0.83.0-rc.1-windows-x64.zip".to_owned(),
             download_url: "https://example.invalid/preview.zip".to_owned(),
             size: 7,
             digest: PublishedSha256::parse(
@@ -2044,6 +2055,8 @@ mod tests {
         let stable = ReleasePackage {
             channel: ReleaseChannel::Stable,
             version: "v0.82.1".to_owned(),
+            semver: ReleaseVersion::parse("v0.82.1").expect("stable semver"),
+            prerelease: false,
             asset_name: "openmohaa-v0.82.1-windows-x64.zip".to_owned(),
             download_url: "https://example.invalid/stable.zip".to_owned(),
             size: 6,
@@ -2055,7 +2068,7 @@ mod tests {
         assert_eq!(
             installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &stable),
             OpenMohaaInstalledBuild::KnownOther {
-                channel: ReleaseChannel::Dev,
+                channel: ReleaseChannel::Preview,
                 version: preview.version.clone(),
             }
         );

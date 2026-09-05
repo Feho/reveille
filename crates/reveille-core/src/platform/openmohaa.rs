@@ -2,6 +2,7 @@
 
 //! Digest-gated `OpenMoHAA` GitHub Release selection, download, installation, and update.
 
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 use std::fs::{self, File};
@@ -19,12 +20,17 @@ use zip::ZipArchive;
 
 use super::package::{self as package_io, OverlayFile};
 
-// GitHub REST Releases API: /releases/latest excludes prereleases, including OpenMoHAA's rolling
-// `dev` release. https://docs.github.com/rest/releases/releases#get-the-latest-release
-const STABLE_RELEASE_URL: &str = "https://api.github.com/repos/openmoh/openmohaa/releases/latest";
-// OpenMoHAA publishes its opt-in rolling build as the `dev` prerelease tag.
-const DEV_RELEASE_URL: &str = "https://api.github.com/repos/openmoh/openmohaa/releases/tags/dev";
-const USER_AGENT: &str = "Reveille/0.1 (+https://github.com/openmoh/openmohaa)";
+// GitHub REST Releases API: /releases/latest excludes prereleases and drafts, so it is exactly
+// the stable channel. https://docs.github.com/rest/releases/releases#get-the-latest-release
+const STABLE_RELEASE_URL: &str =
+    "https://api.github.com/repos/mohcentral/openmohaa/releases/latest";
+// The preview channel has no fixed tag: every build publishes an immutable semver prerelease tag
+// (`v0.83.0-rc.1`). The list endpoint is sorted by creation date, which lies when a hotfix is cut
+// from an older branch, so the newest entry is chosen by parsed semver precedence instead.
+// https://docs.github.com/rest/releases/releases#list-releases
+const RELEASE_LIST_URL: &str =
+    "https://api.github.com/repos/mohcentral/openmohaa/releases?per_page=30";
+const USER_AGENT: &str = "Reveille/0.1 (+https://github.com/mohcentral/openmohaa)";
 const MAX_RELEASE_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Executable stems every `OpenMoHAA` release archive installs, without a platform extension.
@@ -140,44 +146,188 @@ impl ReleaseTarget {
         }
     }
 
-    const fn asset_suffix(self, channel: ReleaseChannel) -> &'static str {
-        // openmoh/openmohaa .github/workflows/tags-publish-release.yml, verified at v0.82.1.
-        // Exact suffixes deliberately exclude stable Windows `-pdb.zip`/`.msi` assets and the
-        // unsupported PowerPC archives. The dev channel only publishes complete Windows builds
-        // inside its `-pdb.zip` assets. Both macOS hosts intentionally select one universal asset.
-        match (channel, self) {
-            (_, Self::LinuxAmd64) => "-linux-amd64.zip",
-            (_, Self::LinuxArm64) => "-linux-arm64.zip",
-            (_, Self::LinuxArmhf) => "-linux-armhf.zip",
-            (_, Self::LinuxI686) => "-linux-i686.zip",
-            (_, Self::MacosArm64 | Self::MacosX64) => "-macos-multiarch-arm64-x86_64.zip",
-            (ReleaseChannel::Stable, Self::WindowsX64) => "-windows-x64.zip",
-            (ReleaseChannel::Stable, Self::WindowsX86) => "-windows-x86.zip",
-            (ReleaseChannel::Stable, Self::WindowsArm64) => "-windows-arm64.zip",
-            (ReleaseChannel::Dev, Self::WindowsX64) => "-windows-x64-pdb.zip",
-            (ReleaseChannel::Dev, Self::WindowsX86) => "-windows-x86-pdb.zip",
-            (ReleaseChannel::Dev, Self::WindowsArm64) => "-windows-arm64-pdb.zip",
+    const fn asset_suffix(self) -> &'static str {
+        // mohcentral/openmohaa .github/workflows/publish-release.yml — one tag-triggered workflow
+        // publishes both channels, so the asset names no longer differ per channel. Exact
+        // suffixes deliberately exclude the `-pdb.zip` symbol archives, the `.msi` installer and
+        // the unsupported PowerPC builds. Both macOS hosts intentionally select one universal
+        // asset. `-windows-x64.zip` does not match `-windows-x64-pdb.zip`, so the symbol archive
+        // can ship alongside without making the selection ambiguous.
+        match self {
+            Self::LinuxAmd64 => "-linux-amd64.zip",
+            Self::LinuxArm64 => "-linux-arm64.zip",
+            Self::LinuxArmhf => "-linux-armhf.zip",
+            Self::LinuxI686 => "-linux-i686.zip",
+            Self::MacosArm64 | Self::MacosX64 => "-macos-multiarch-arm64-x86_64.zip",
+            Self::WindowsX64 => "-windows-x64.zip",
+            Self::WindowsX86 => "-windows-x86.zip",
+            Self::WindowsArm64 => "-windows-arm64.zip",
         }
     }
 }
 
-/// Release stream used for its endpoint, asset suffix table, and update identity.
+/// Release stream used for its endpoint and update identity.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseChannel {
     /// Versioned release returned by GitHub's latest stable endpoint.
     Stable,
-    /// Opt-in rolling prerelease built from the latest `OpenMoHAA` commit.
-    Dev,
+    /// Opt-in stream that takes the highest semver release, prereleases included.
+    Preview,
 }
 
 impl ReleaseChannel {
     const fn endpoint(self) -> &'static str {
         match self {
             Self::Stable => STABLE_RELEASE_URL,
-            Self::Dev => DEV_RELEASE_URL,
+            Self::Preview => RELEASE_LIST_URL,
         }
     }
+
+    /// Whether a parsed release belongs to this channel.
+    ///
+    /// Preview deliberately admits stable releases too: a player on the preview channel who has
+    /// `v0.83.0-rc.2` installed must be offered `v0.83.0` when it ships, not stranded on the
+    /// release candidate.
+    const fn admits_prereleases(self) -> bool {
+        match self {
+            Self::Stable => false,
+            Self::Preview => true,
+        }
+    }
+}
+
+/// Semver version parsed from a release tag, ordered by semver precedence.
+///
+/// Build metadata (`+abc`) is parsed and discarded: semver gives it no precedence, so keeping it
+/// would make two identical versions compare unequal.
+#[derive(Clone, Debug, Serialize)]
+pub struct ReleaseVersion {
+    major: u64,
+    minor: u64,
+    patch: u64,
+    /// Dot-separated prerelease identifiers; empty for a stable version.
+    prerelease: Vec<String>,
+    /// The tag exactly as GitHub published it, so nothing displayed is reconstructed.
+    tag: String,
+}
+
+impl ReleaseVersion {
+    /// Parse a `v`-prefixed or bare semver tag such as `v0.83.0-rc.1`.
+    ///
+    /// Returns `None` for a tag that is not semver; callers skip such releases rather than
+    /// failing, so an unrelated tag in the repository cannot break selection.
+    #[must_use]
+    pub fn parse(tag: &str) -> Option<Self> {
+        let rest = tag.strip_prefix('v').unwrap_or(tag);
+        let rest = rest.split('+').next()?;
+        // `Option` rather than an empty string: `v0.83.0-` has a prerelease separator and no
+        // identifiers, which semver rejects; collapsing the two would silently accept it.
+        let (core, prerelease) = match rest.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (rest, None),
+        };
+        let mut numbers = core.split('.');
+        let major = parse_version_number(numbers.next()?)?;
+        let minor = parse_version_number(numbers.next()?)?;
+        let patch = parse_version_number(numbers.next()?)?;
+        if numbers.next().is_some() {
+            return None;
+        }
+        let prerelease = match prerelease {
+            None => Vec::new(),
+            Some(pre) => {
+                let identifiers = pre.split('.').map(str::to_owned).collect::<Vec<String>>();
+                if identifiers.iter().any(String::is_empty) {
+                    return None;
+                }
+                identifiers
+            }
+        };
+        Some(Self {
+            major,
+            minor,
+            patch,
+            prerelease,
+            tag: tag.to_owned(),
+        })
+    }
+
+    /// Whether this version carries a prerelease identifier such as `-rc.1`.
+    #[must_use]
+    pub fn is_prerelease(&self) -> bool {
+        !self.prerelease.is_empty()
+    }
+
+    /// The tag exactly as published.
+    #[must_use]
+    pub fn tag(&self) -> &str {
+        &self.tag
+    }
+}
+
+// Equality is semver precedence, not tag equality: `v0.83.0` and `v0.83.0+a2f3401` are the same
+// version, so deriving `PartialEq` over the verbatim tag would disagree with `Ord`.
+impl PartialEq for ReleaseVersion {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for ReleaseVersion {}
+
+impl Ord for ReleaseVersion {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.major
+            .cmp(&other.major)
+            .then_with(|| self.minor.cmp(&other.minor))
+            .then_with(|| self.patch.cmp(&other.patch))
+            .then_with(|| compare_prerelease(&self.prerelease, &other.prerelease))
+    }
+}
+
+impl PartialOrd for ReleaseVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl fmt::Display for ReleaseVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.tag)
+    }
+}
+
+fn parse_version_number(value: &str) -> Option<u64> {
+    // Semver forbids leading zeroes, and accepting them would let `v1.01.0` and `v1.1.0` compare
+    // equal while displaying differently.
+    if value.is_empty() || (value.len() > 1 && value.starts_with('0')) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+/// Semver §11.4: a version with a prerelease sorts below the same version without one, and
+/// identifiers are compared left to right, numeric below alphanumeric.
+fn compare_prerelease(left: &[String], right: &[String]) -> Ordering {
+    match (left.is_empty(), right.is_empty()) {
+        (true, true) => return Ordering::Equal,
+        (true, false) => return Ordering::Greater,
+        (false, true) => return Ordering::Less,
+        (false, false) => {}
+    }
+    for (left, right) in left.iter().zip(right) {
+        let ordering = match (left.parse::<u64>(), right.parse::<u64>()) {
+            (Ok(left), Ok(right)) => left.cmp(&right),
+            (Ok(_), Err(_)) => Ordering::Less,
+            (Err(_), Ok(_)) => Ordering::Greater,
+            (Err(_), Err(_)) => left.as_str().cmp(right.as_str()),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    left.len().cmp(&right.len())
 }
 
 /// Channel and host target needed to select one exact release asset.
@@ -197,9 +347,9 @@ impl ReleaseSelector {
     }
 
     #[must_use]
-    pub const fn dev(target: ReleaseTarget) -> Self {
+    pub const fn preview(target: ReleaseTarget) -> Self {
         Self {
-            channel: ReleaseChannel::Dev,
+            channel: ReleaseChannel::Preview,
             target,
         }
     }
@@ -218,8 +368,13 @@ pub struct UnsupportedHost {
 pub struct ReleasePackage {
     /// Release stream that supplied this package.
     pub channel: ReleaseChannel,
-    /// Stable tag or rolling dev release name; the latter contains the source commit identity.
+    /// The release tag exactly as published; immutable on both channels.
     pub version: String,
+    /// Parsed semver of `version`, present for every tag Reveille will install.
+    pub semver: ReleaseVersion,
+    /// Whether the selected release is a prerelease. The preview channel can legitimately serve
+    /// a stable release, so this is a property of the release, not of the channel.
+    pub prerelease: bool,
     /// Exact release asset filename.
     pub asset_name: String,
     /// Browser download URL returned by GitHub.
@@ -269,11 +424,11 @@ pub struct ReleaseDownloadProgress {
     pub total: Option<u64>,
 }
 
-/// Parse a frozen or live GitHub release response and select one exact portable archive.
+/// Parse a frozen or live single-release GitHub response and select one exact portable archive.
 ///
 /// # Errors
 ///
-/// Returns an error for malformed JSON, a missing/ambiguous asset, a missing dev identity, or a
+/// Returns an error for malformed JSON, a non-semver tag, a missing/ambiguous asset, or a
 /// missing/invalid published digest.
 pub fn parse_release(
     json: &str,
@@ -281,7 +436,50 @@ pub fn parse_release(
 ) -> Result<ReleasePackage, OpenMohaaError> {
     let release: RawRelease =
         serde_json::from_str(json).map_err(OpenMohaaError::MalformedRelease)?;
-    let suffix = selector.target.asset_suffix(selector.channel);
+    select_package(release, selector)
+}
+
+/// Parse a frozen or live `/releases` list and select the highest semver release for a channel.
+///
+/// A tag that is not semver is skipped rather than treated as a failure: an unrelated tag pushed
+/// to the repository must not be able to break selection for every player. GitHub sorts the list
+/// by creation date, which misorders a hotfix cut from an older branch, so precedence is decided
+/// by the parsed version.
+///
+/// # Errors
+///
+/// Returns [`OpenMohaaError::NoSelectableRelease`] when no published release carries a semver
+/// tag the channel admits, and otherwise the same errors as [`parse_release`].
+pub fn parse_release_list(
+    json: &str,
+    selector: ReleaseSelector,
+) -> Result<ReleasePackage, OpenMohaaError> {
+    let releases: Vec<RawRelease> =
+        serde_json::from_str(json).map_err(OpenMohaaError::MalformedRelease)?;
+    let newest = releases
+        .into_iter()
+        .filter(|release| !release.draft)
+        .filter_map(|release| {
+            let version = ReleaseVersion::parse(&release.tag_name)?;
+            // A release counts as a prerelease if either its tag or GitHub's flag says so; the
+            // two disagreeing is a publishing mistake that must not leak an untested build into
+            // the stable channel.
+            let is_prerelease = version.is_prerelease() || release.prerelease;
+            (selector.channel.admits_prereleases() || !is_prerelease).then_some((version, release))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, release)| release)
+        .ok_or(OpenMohaaError::NoSelectableRelease(selector.channel))?;
+    select_package(newest, selector)
+}
+
+fn select_package(
+    release: RawRelease,
+    selector: ReleaseSelector,
+) -> Result<ReleasePackage, OpenMohaaError> {
+    let semver = ReleaseVersion::parse(&release.tag_name)
+        .ok_or_else(|| OpenMohaaError::UnversionedRelease(release.tag_name.clone()))?;
+    let suffix = selector.target.asset_suffix();
     let mut matching_assets = release
         .assets
         .into_iter()
@@ -302,13 +500,11 @@ pub fn parse_release(
             maximum: MAX_RELEASE_BYTES,
         });
     }
-    let version = match selector.channel {
-        ReleaseChannel::Stable => release.tag_name,
-        ReleaseChannel::Dev => release.name.ok_or(OpenMohaaError::MissingDevIdentity)?,
-    };
     Ok(ReleasePackage {
         channel: selector.channel,
-        version,
+        version: release.tag_name,
+        prerelease: semver.is_prerelease() || release.prerelease,
+        semver,
         asset_name: asset.name,
         download_url: asset.browser_download_url,
         size: asset.size,
@@ -370,7 +566,10 @@ impl OpenMohaaReleaseClient {
             return Err(OpenMohaaError::HttpStatus(status.as_u16()));
         }
         let text = response.text().await.map_err(OpenMohaaError::Network)?;
-        parse_release(&text, selector)
+        match selector.channel {
+            ReleaseChannel::Stable => parse_release(&text, selector),
+            ReleaseChannel::Preview => parse_release_list(&text, selector),
+        }
     }
 
     /// Fetch and select the latest stable portable archive for a target.
@@ -674,7 +873,12 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[derive(Deserialize)]
 struct RawRelease {
     tag_name: String,
-    name: Option<String>,
+    // `/releases/latest` omits neither, but a hand-frozen fixture may; defaulting keeps a missing
+    // flag from being read as "published stable".
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
     assets: Vec<RawAsset>,
 }
 
@@ -701,8 +905,10 @@ pub enum OpenMohaaError {
     MissingAsset(ReleaseSelector),
     #[error("release has more than one portable asset for {0:?}")]
     AmbiguousAsset(ReleaseSelector),
-    #[error("rolling dev release has no commit-bearing release name")]
-    MissingDevIdentity,
+    #[error("no published release carries a semver tag for the {0:?} channel")]
+    NoSelectableRelease(ReleaseChannel),
+    #[error("release tag {0:?} is not a semver version")]
+    UnversionedRelease(String),
     #[error("release asset {0:?} has no publisher digest")]
     MissingDigest(String),
     #[error("unsupported published digest {0:?}")]
@@ -754,8 +960,8 @@ mod tests {
 
     use super::{
         ClientActivity, OpenMohaaError, PublishedSha256, ReleaseChannel, ReleasePackage,
-        ReleaseSelector, ReleaseTarget, UpdateDeferredReason, UpdateOutcome,
-        install_verified_archive, parse_latest_release, parse_release,
+        ReleaseSelector, ReleaseTarget, ReleaseVersion, UpdateDeferredReason, UpdateOutcome,
+        install_verified_archive, parse_latest_release, parse_release_list,
     };
 
     #[test]
@@ -864,22 +1070,118 @@ mod tests {
     }
 
     #[test]
-    fn dev_selector_uses_its_own_endpoint_shape_and_release_identity() {
-        let fixture = r#"{
-            "tag_name":"dev",
-            "name":"main-a2f34019",
-            "assets":[{
-                "name":"openmohaa-dev-windows-x64-pdb.zip",
-                "browser_download_url":"https://example.invalid/dev.zip",
-                "size":42,
-                "digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    fn preview_channel_takes_the_highest_semver_release_not_the_newest_entry() {
+        let fixture = include_str!("../../tests/fixtures/openmohaa_release_list.json");
+        let package =
+            parse_release_list(fixture, ReleaseSelector::preview(ReleaseTarget::WindowsX64))
+                .expect("preview release package");
+        // The list is ordered by creation date and leads with the v0.82.2 hotfix cut from an
+        // older branch; semver precedence must still choose the v0.83.0-rc.2 candidate.
+        assert_eq!(package.channel, ReleaseChannel::Preview);
+        assert_eq!(package.version, "v0.83.0-rc.2");
+        assert!(package.prerelease);
+        assert_eq!(package.asset_name, "openmohaa-v0.83.0-rc.2-windows-x64.zip");
+    }
+
+    #[test]
+    fn stable_selection_from_a_list_skips_every_prerelease_and_draft() {
+        let fixture = include_str!("../../tests/fixtures/openmohaa_release_list.json");
+        let package =
+            parse_release_list(fixture, ReleaseSelector::stable(ReleaseTarget::WindowsX64))
+                .expect("stable release package");
+        assert_eq!(package.version, "v0.82.2");
+        assert!(!package.prerelease);
+    }
+
+    #[test]
+    fn preview_channel_offers_a_stable_release_once_it_outranks_the_candidate() {
+        // The candidate is promoted exactly as publishing would: the tag loses its prerelease
+        // identifier and GitHub's flag is cleared with it.
+        let fixture = include_str!("../../tests/fixtures/openmohaa_release_list.json")
+            .replace("v0.83.0-rc.2", "v0.83.0")
+            .replace(
+                "\"tag_name\": \"v0.83.0\",
+    \"draft\": false,
+    \"prerelease\": true",
+                "\"tag_name\": \"v0.83.0\",
+    \"draft\": false,
+    \"prerelease\": false",
+            );
+        let package = parse_release_list(
+            &fixture,
+            ReleaseSelector::preview(ReleaseTarget::WindowsX64),
+        )
+        .expect("preview release package");
+        assert_eq!(package.version, "v0.83.0");
+        assert!(!package.prerelease);
+    }
+
+    #[test]
+    fn a_non_semver_tag_is_skipped_rather_than_failing_the_whole_channel() {
+        let fixture = include_str!("../../tests/fixtures/openmohaa_release_list.json").replace(
+            "\"tag_name\": \"v0.83.0-rc.2\"",
+            "\"tag_name\": \"nightly-2026-09-05\"",
+        );
+        let package = parse_release_list(
+            &fixture,
+            ReleaseSelector::preview(ReleaseTarget::WindowsX64),
+        )
+        .expect("preview release package");
+        assert_eq!(package.version, "v0.83.0-rc.1");
+
+        let empty = parse_release_list("[]", ReleaseSelector::preview(ReleaseTarget::WindowsX64));
+        assert!(matches!(
+            empty,
+            Err(OpenMohaaError::NoSelectableRelease(ReleaseChannel::Preview))
+        ));
+    }
+
+    #[test]
+    fn a_stable_tag_flagged_prerelease_stays_out_of_the_stable_channel() {
+        let fixture = r#"[{
+            "tag_name": "v0.84.0",
+            "draft": false,
+            "prerelease": true,
+            "assets": [{
+                "name": "openmohaa-v0.84.0-windows-x64.zip",
+                "browser_download_url": "https://example.invalid/openmohaa-v0.84.0-windows-x64.zip",
+                "size": 42,
+                "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
             }]
-        }"#;
-        let package = parse_release(fixture, ReleaseSelector::dev(ReleaseTarget::WindowsX64))
-            .expect("dev release package");
-        assert_eq!(package.channel, ReleaseChannel::Dev);
-        assert_eq!(package.version, "main-a2f34019");
-        assert_eq!(package.asset_name, "openmohaa-dev-windows-x64-pdb.zip");
+        }]"#;
+        assert!(matches!(
+            parse_release_list(fixture, ReleaseSelector::stable(ReleaseTarget::WindowsX64)),
+            Err(OpenMohaaError::NoSelectableRelease(ReleaseChannel::Stable))
+        ));
+        let package =
+            parse_release_list(fixture, ReleaseSelector::preview(ReleaseTarget::WindowsX64))
+                .expect("preview release package");
+        assert!(package.prerelease);
+    }
+
+    #[test]
+    fn semver_precedence_orders_candidates_below_their_release() {
+        let ordered = [
+            "v0.82.9",
+            "v0.83.0-alpha.1",
+            "v0.83.0-rc.1",
+            "v0.83.0-rc.2",
+            "v0.83.0-rc.10",
+            "v0.83.0",
+            "v0.83.1",
+        ]
+        .map(|tag| ReleaseVersion::parse(tag).expect("semver tag"));
+        for pair in ordered.windows(2) {
+            assert!(pair[0] < pair[1], "{} !< {}", pair[0], pair[1]);
+        }
+        // Build metadata carries no precedence, and the displayed tag stays verbatim.
+        let build = ReleaseVersion::parse("v0.83.0+a2f3401").expect("semver tag");
+        assert_eq!(build, ReleaseVersion::parse("0.83.0").expect("semver tag"));
+        assert_eq!(build.tag(), "v0.83.0+a2f3401");
+
+        for rejected in ["dev", "v0.83", "v0.83.0.1", "v01.0.0", "v0.83.0-"] {
+            assert!(ReleaseVersion::parse(rejected).is_none(), "{rejected}");
+        }
     }
 
     #[test]
@@ -993,8 +1295,10 @@ mod tests {
     fn package(bytes: &[u8]) -> ReleasePackage {
         ReleasePackage {
             channel: ReleaseChannel::Stable,
-            version: "fixture".to_owned(),
-            asset_name: "openmohaa-fixture-windows-x64.zip".to_owned(),
+            version: "v0.82.1".to_owned(),
+            semver: ReleaseVersion::parse("v0.82.1").expect("fixture semver"),
+            prerelease: false,
+            asset_name: "openmohaa-v0.82.1-windows-x64.zip".to_owned(),
             download_url: "https://example.invalid/openmohaa.zip".to_owned(),
             size: bytes.len() as u64,
             digest: PublishedSha256::from_bytes(bytes),
