@@ -135,30 +135,114 @@ function rebornDetails(install, render) {
     build?.state === "known_other" && el("span", { className: "quiet" }, `${build.version} is installed. Reveille will not call it current.`),
     build?.state === "unknown" && el("span", { className: "quiet" }, "Reborn files are present, but this version is unknown."),
     !info.supported && el("span", { className: "note note--bad" }, "This legacy Reborn package supports Windows only."),
-    view.installing === "reborn" ? installProgress(render) : !isInstalled("reborn") && el("button", { type: "button", className: "btn btn--primary", disabled: !info.supported, onclick: (event) => { event.preventDefault(); void runRebornInstall(install, render); } }, "Install Reborn"),
+    view.installing === "reborn" ? installProgress(render) : rebornAction(install, info, build, render),
     view.result?.engine === "reborn" && el("span", { className: "note note--brass" }, "Reborn is installed and active."));
+}
+
+/**
+ * Reborn's action, offered on the same terms as OpenMoHAA's.
+ *
+ * Reveille installs one pinned Reborn package, so anything that is not that package is something
+ * this button can change — and it used to be drawn only when nothing was installed at all, which
+ * left a folder holding another known build, or files Reveille did not write, with the evidence
+ * line and no way to act on it. A build proved to be the pinned one keeps its secondary
+ * reinstall and no primary action (rule H10).
+ */
+function rebornAction(install, info, build, render) {
+  const state = build?.state ?? "absent";
+  const current = state === "current";
+  const label = current ? "Reinstall this version" : state === "absent" ? "Install Reborn" : `Install Reborn ${info.version}`;
+  return el("button", { type: "button", className: `btn ${current ? "" : "btn--primary"}`, disabled: !info.supported,
+    onclick: (event) => { event.preventDefault(); void runRebornInstall(install, render); } }, label);
 }
 
 function openDetails(install, render) {
   const status = view.openStatus;
+  const available = status?.availability === "available";
   return el("span", { className: "engine-card__details" },
     el("label", { className: "engine-choice" }, el("span", { className: "engine-choice__label" }, "Version"),
-      el("select", { value: view.channel, onchange: (event) => { event.preventDefault(); view.channel = event.target.value; void loadOpenStatus(install, render); } },
+      el("select", { value: view.channel, onchange: (event) => { event.preventDefault(); view.channel = event.target.value; view.result = null; void loadOpenStatus(install, render); } },
         el("option", { value: "stable", selected: view.channel === "stable" }, "Stable"), el("option", { value: "preview", selected: view.channel === "preview" }, "Preview — less tested"))),
     view.openError && el("span", { className: "note note--bad", title: view.openError }, "Release details could not be checked right now."),
     status?.availability === "unsupported" && el("span", { className: "note note--bad" }, "OpenMoHAA is unavailable for this computer."),
-    status?.availability === "available" && el("span", { className: "kv-line" }, el("span", null, "Version"), el("strong", null, status.package.prerelease ? `${status.package.version} — preview` : status.package.version)),
-    status?.availability === "available" && el("span", { className: "kv-line" }, el("span", null, "Download"), el("strong", { title: status.package.asset_name }, bytes(status.package.size))),
-    status?.availability === "available" && openBuildNote(status.installed_build),
-    status?.availability === "available" && el("span", { className: "note", title: status.package.digest }, "Reveille checks that the download arrived intact before installing it."),
-    view.installing === "openmohaa" ? installProgress(render) : status?.availability === "available" && !isInstalled("openmohaa") && el("button", { type: "button", className: "btn btn--primary", onclick: (event) => { event.preventDefault(); void runOpenInstall(install, render); } }, "Install OpenMoHAA"));
+    available && el("span", { className: "kv-line" }, el("span", null, "Version"), el("strong", null, status.package.prerelease ? `${status.package.version} — preview` : status.package.version)),
+    available && el("span", { className: "kv-line" }, el("span", null, "Download"), el("strong", { title: status.package.asset_name }, bytes(status.package.size))),
+    available && openBuildNote(status.installed_build),
+    available && el("span", { className: "note", title: status.package.digest }, "Reveille checks that the download arrived intact before installing it."),
+    available && openRunningNote(status),
+    view.installing === "openmohaa" ? installProgress(render) : available && openAction(install, status, render),
+    view.result?.engine === "openmohaa" && openOutcomeNote(view.result));
 }
 
 function openBuildNote(build) {
   if (build?.state === "current") return el("span", { className: "quiet" }, "This exact version is installed.");
-  if (build?.state === "known_other") return el("span", { className: "quiet" }, `${build.version} is installed.`);
+  if (build?.state === "known_other") return el("span", { className: "quiet" }, knownOtherText(build));
   if (build?.state === "unknown") return el("span", { className: "quiet" }, "OpenMoHAA is installed, but this version is unknown.");
   return false;
+}
+
+function knownOtherText(build) {
+  if (build.relation === "older") return `${build.version} is installed, which is newer than this one.`;
+  if (build.relation === "same_version") return `${build.version} is installed, from a different release file.`;
+  return `${build.version} is installed.`;
+}
+
+/**
+ * The one action the OpenMoHAA card offers, named after what it will actually do.
+ *
+ * This button used to be drawn only while nothing was installed, which left a player who already
+ * had OpenMoHAA no way to change the version at all: choosing Preview showed the newer release,
+ * and Continue to servers then recorded the engine choice and installed nothing, so the binaries
+ * in the folder never moved (docs/friction.md F2).
+ *
+ * The wording comes from the receipt comparison in Rust, never from comparing version strings
+ * here. The channel selector can legitimately offer a *lower* version — preview holds
+ * `v0.83.0-rc.2`, stable offers `v0.82.1` — and calling that an update would name a rollback
+ * something the player did not choose (rule H10). A build Reveille can prove is the offered one
+ * gets no primary action, only a secondary reinstall, for the same reason.
+ */
+function openAction(install, status, render) {
+  const build = status.installed_build;
+  const current = build?.state === "current";
+  const label = current ? "Reinstall this version" : openActionLabel(build, status.package.version);
+  return el("button", { type: "button", className: `btn ${current ? "" : "btn--primary"}`,
+    onclick: (event) => { event.preventDefault(); void runOpenInstall(install, render); } }, label);
+}
+
+function openActionLabel(build, version) {
+  if (build?.state !== "known_other") return `Install ${version}`;
+  if (build.relation === "newer") return `Update to ${version}`;
+  if (build.relation === "older") return `Go back to ${version}`;
+  if (build.relation === "same_version") return `Reinstall ${version}`;
+  return `Install ${version}`;
+}
+
+/**
+ * Said before the download rather than after it.
+ *
+ * Reveille will not write over files a running program is using (rule S2), and it proves that
+ * only once the archive has arrived — a player can start the game during a 100MB transfer. A
+ * player told afterwards has paid for the download for nothing, so the reading taken alongside
+ * the release details is shown for what it is worth. It is worth stating only where replacement
+ * is on the table: with nothing installed there is nothing to overwrite.
+ */
+function openRunningNote(status) {
+  if (status.installed_build?.state === "absent") return false;
+  if (status.activity?.state !== "running") return false;
+  return el("span", { className: "note note--bad" }, "OpenMoHAA is running. Close it first — Reveille will not replace files a running program is using.");
+}
+
+/** What the install actually did, including the case where it deliberately did nothing. */
+function openOutcomeNote(result) {
+  const outcome = result.outcome?.outcome;
+  if (outcome === "deferred") {
+    return el("span", { className: "note note--bad", role: "alert" }, result.outcome.reason === "client_running"
+      ? "OpenMoHAA was running when the download finished, so nothing in the folder was changed. Close the game and try again."
+      : "Reveille could not confirm OpenMoHAA was closed when the download finished, so nothing in the folder was changed. Close the game and try again.");
+  }
+  return el("span", { className: "note note--brass" }, outcome === "updated"
+    ? `OpenMoHAA is now ${result.version}, and active.`
+    : `OpenMoHAA ${result.version} is installed and active.`);
 }
 
 function installProgress(render) {
@@ -207,25 +291,47 @@ async function loadOpenStatus(install, render) {
   render();
 }
 
+/**
+ * A deferred install is not a failure and is not a success either.
+ *
+ * `install_openmohaa` resolves with what it actually did. Replacement is refused while one of the
+ * engine's programs is running or cannot be proved stopped (rule S2), and that check happens
+ * after the transfer, so the ordinary success path would otherwise report an install that wrote
+ * nothing. Nothing changed on disk, so the engine choice is left where it was and only the
+ * release details are re-read.
+ */
 async function runOpenInstall(install, render) {
   if (!view.openStatus?.package) return;
+  const version = view.openStatus.package.version;
   beginInstall("openmohaa", render);
-  try { await installOpenMohaa(install.root, view.openStatus.package.offer_id); await reloadAfterInstall(install, "openmohaa", render); }
-  catch (error) { view.error = error?.detail ?? errorText(error); finishInstall(render); }
+  try {
+    const result = await installOpenMohaa(install.root, view.openStatus.package.offer_id);
+    view.result = { engine: "openmohaa", outcome: result.outcome, version };
+    if (result.outcome?.outcome === "deferred") {
+      view.installing = null; view.progress = null;
+      await loadOpenStatus(install, render);
+      return;
+    }
+    await reloadAfterInstall(install, "openmohaa", render);
+  } catch (error) { view.error = error?.detail ?? errorText(error); finishInstall(render); }
 }
 
 async function runRebornInstall(install, render) {
   beginInstall("reborn", render);
-  try { await installReborn(install.root); await reloadAfterInstall(install, "reborn", render); }
+  try { await installReborn(install.root); view.result = { engine: "reborn" }; await reloadAfterInstall(install, "reborn", render); }
   catch (error) { view.error = errorText(error); finishInstall(render); }
 }
 
 function beginInstall(engine, render) { view.installing = engine; view.stopping = false; view.progress = null; view.error = null; view.result = null; render(); }
 async function reloadAfterInstall(install, engine, render) {
-  view.result = { engine }; view.installing = null; view.progress = null;
+  view.installing = null; view.progress = null;
   rememberEngine(install.root, engine);
   view.overview = await engineOverview(install.root, engine); view.selected = engine;
-  adoptCandidate((await detectInstall(install.root)) ?? install); render();
+  adoptCandidate((await detectInstall(install.root)) ?? install);
+  // The card's installed-build line and its action are both read off this status, so a version
+  // that has just changed on disk must not keep the reading taken before the install.
+  if (engine === "openmohaa") await loadOpenStatus(install, render);
+  render();
 }
 function finishInstall(render) { view.installing = null; view.stopping = false; view.progress = null; render(); }
 async function stopInstall(render) {

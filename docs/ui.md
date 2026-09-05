@@ -160,7 +160,17 @@ There is **one** primary surface. The three-screen wizard was removed.
   cards for OpenMoHAA, Reborn, and Original game. Their descriptions are neutral; neither community
   engine receives a recommendation badge. Version, download size, installed state, and active state
   appear only where relevant. OpenMoHAA's stable/preview selector stays inside its card. Continue is
-  disabled when the selected engine is unavailable. Reborn installation selects and activates it,
+  disabled when the selected engine is unavailable.
+  **Each card carries exactly one action, and it is named after what it will do.** Continue moves
+  to the servers; it never installs anything, so a card that names a version the folder does not
+  hold must offer the way to get it — **Update to v0.84.0-rc.1**, **Go back to v0.82.1** where a
+  channel switch offers a lower version, **Reinstall v0.83.0** for the same version from a
+  different release file, **Install** where nothing can be ordered against the offer, and a
+  secondary **Reinstall this version** where the installed build is provably the offered one. The
+  direction is the receipt comparison from Rust (**H10**), never a version-string comparison in the
+  shell. Where replacement is on the table and the process check already reads *running*, the card
+  says so before the download rather than after it (**S2**), and an install that wrote nothing
+  because a program was running says exactly that instead of reporting success. Reborn installation selects and activates it,
   while switching keeps both managed engines installed. The titlebar chip names the selected game
   and the active engine beside the canonical game folder.
   **When the folder can run more than one game it also asks "Which game do you want to play?"**,
@@ -307,7 +317,7 @@ Change a rule in the register first, then update the right-hand column here.
 | **H13** · Index the whole search path | An expansion session indexes `main` underneath `mainta` or `maintt`, so a base-game map is never reported as missing on a Spearhead or Breakthrough server. |
 | **H14** · Never offer a game the folder has no files for | The **Game** switch lists only the products detected in the folder, and is hidden entirely when there is one. |
 | **H9** · A failure is a recorded non-result | Per-map install failures list individually; the pass is never abandoned. Unanswered endpoints are counted and broken down by reason in a dialog. |
-| **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. |
+| **H10** · Never recommend replacing an installed engine without version evidence | A validated Reveille receipt may say **Up to date** or name another known build. Presence without a valid receipt says **Version unknown**. A current build has no primary engine action; **Reinstall this version** is secondary. Every other build keeps a primary action, named from the `OfferRelation` Rust computed — **Update to**, **Go back to**, **Reinstall**, **Install** — because withholding it left the card stating a version with no way to reach it. |
 | **H11** · Never call the measured round trip the in-game ping | The column is **Ping** because that is the word players look for, but every explanation is the honest one: the tooltip says "Time for one status request to this server and back, measured once during this check. Not the in-game ping." The figure carries no colour, no bars and no bands — it is a measurement to sort by, not a verdict, for the same reason the list carries no traffic light. The toolbar's **Ping under** gate names itself after the column, so the control and the figure make the same claim. |
 | **H12** · Never present a remembered server's facts as current, and never call a launch a join | A bookmark stores an address, a query port and a name — no figures exist to go stale. An absent favorite says **not in this list** (never "offline": a server missing from the master's list was never asked) and only a check that actually failed says **did not answer**. A live row says when it was measured (**Checked at 14:32**) and is dropped outright when a later check finds the server gone. History says **Launched**, is written only from a launched outcome, and its tooltip says "Whether the server let you in is not something Reveille can see." |
 | **H16** · Never offer the installed or an older Reveille release as an update | The titlebar and first-run card show **Update Reveille** only after the updater has compared semantic versions from the latest published manifest. The dialog names both versions and never constructs an offer from release text or a filename. Signature verification is the install gate in S6; it does not sign the manifest's version label. |
