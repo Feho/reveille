@@ -118,6 +118,10 @@ installed client files before calling that exact package current. Exact pinned e
 identify the current Reborn package; a historical receipt identifies only a known other build;
 anything else is version unknown. The setup view distinguishes current / another known build /
 unknown build / absent. Tests cover unchanged and externally changed installed files.
+OpenMoHAA package identity is the exact version, asset name and digest, independent of the
+selected channel. Legacy `dev` receipts deserialize as `preview` and retain their recorded
+version. Tests: `identical_openmohaa_packages_are_current_across_channels` and
+`legacy_dev_receipts_keep_their_installed_build_identity`.
 
 ### H11 · Never call the measured round trip the in-game ping
 **Because** Three different numbers get the same word. The engine's ping is an average over a
@@ -271,6 +275,13 @@ every player. The preview channel deliberately admits stable releases so a playe
 `a_stable_tag_flagged_prerelease_stays_out_of_the_stable_channel`,
 `a_non_semver_tag_is_skipped_rather_than_failing_the_whole_channel`,
 `semver_precedence_orders_candidates_below_their_release`.
+The single-release path applies the same draft and prerelease guard before asset selection.
+Full tags, including prerelease identifiers and build metadata, are validated by `semver`.
+Preview fetches every release-list page before selecting the maximum; a higher version outside
+the first page must not be lost, and a failed later page fails the check rather than offering
+a potentially older build. Test: `preview_fetches_every_page_before_selecting_a_release`.
+Tests: `single_release_selection_enforces_channel_and_draft_guards` and
+`invalid_semver_identifiers_cannot_win_release_selection`.
 
 ---
 

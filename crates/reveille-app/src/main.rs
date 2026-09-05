@@ -844,8 +844,7 @@ fn installed_openmohaa_build(
     let Some(receipt) = validated_openmohaa_receipt(root, &client_path) else {
         return OpenMohaaInstalledBuild::Unknown;
     };
-    if receipt.channel == selected.channel
-        && receipt.version == selected.version
+    if receipt.version == selected.version
         && receipt.asset_name == selected.asset_name
         && receipt.release_digest == selected.digest.to_string()
     {
@@ -2021,6 +2020,98 @@ mod tests {
                 .package,
             stable
         );
+    }
+
+    #[test]
+    fn identical_openmohaa_packages_are_current_across_channels() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        fs::write(root.join("openmohaa.exe"), b"installed stable").expect("client fixture");
+        let mut package = reveille_core::platform::openmohaa::parse_latest_release(
+            include_str!("../../reveille-core/tests/fixtures/openmohaa_latest_release.json"),
+            ReleaseTarget::WindowsX64,
+        )
+        .expect("stable package");
+        for channel in [ReleaseChannel::Preview, ReleaseChannel::Stable] {
+            package.channel = channel;
+            record_openmohaa_install(root, ReleaseTarget::WindowsX64, &package).expect("receipt");
+            package.channel = match channel {
+                ReleaseChannel::Preview => ReleaseChannel::Stable,
+                ReleaseChannel::Stable => ReleaseChannel::Preview,
+            };
+            assert_eq!(
+                installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &package),
+                OpenMohaaInstalledBuild::Current
+            );
+            for changed in [
+                ReleasePackage {
+                    version: "v0.82.2".into(),
+                    ..package.clone()
+                },
+                ReleasePackage {
+                    asset_name: "another-windows-x64.zip".into(),
+                    ..package.clone()
+                },
+                ReleasePackage {
+                    digest: PublishedSha256::parse(&format!("sha256:{}", "0".repeat(64)))
+                        .expect("digest"),
+                    ..package.clone()
+                },
+            ] {
+                assert!(matches!(
+                    installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &changed),
+                    OpenMohaaInstalledBuild::KnownOther { .. }
+                ));
+            }
+        }
+        fs::write(root.join("openmohaa.exe"), b"externally replaced").expect("changed client");
+        assert_eq!(
+            installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &package),
+            OpenMohaaInstalledBuild::Unknown
+        );
+    }
+
+    #[test]
+    fn legacy_dev_receipts_keep_their_installed_build_identity() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        let client = root.join("openmohaa.exe");
+        fs::write(&client, b"legacy preview").expect("client fixture");
+        let receipt = serde_json::json!({
+            "format": super::OPENMOHAA_RECEIPT_FORMAT,
+            "channel": "dev",
+            "version": "Development build 2026-08-20",
+            "asset_name": "openmohaa-dev-windows-x64-pdb.zip",
+            "release_digest": format!("sha256:{}", "0".repeat(64)),
+            "client_sha256": super::sha256_file(&client).expect("client hash"),
+        });
+        fs::write(
+            root.join(super::OPENMOHAA_RECEIPT_FILENAME),
+            receipt.to_string(),
+        )
+        .expect("legacy receipt");
+        let validated =
+            super::validated_openmohaa_receipt(root, &client).expect("legacy receipt recognized");
+        assert_eq!(validated.channel, ReleaseChannel::Preview);
+        assert_eq!(validated.version, "Development build 2026-08-20");
+        assert_eq!(
+            serde_json::to_value(&validated).expect("serialized receipt")["channel"],
+            "preview"
+        );
+        let selected = reveille_core::platform::openmohaa::parse_latest_release(
+            include_str!("../../reveille-core/tests/fixtures/openmohaa_latest_release.json"),
+            ReleaseTarget::WindowsX64,
+        )
+        .expect("selected package");
+        assert_eq!(
+            installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &selected),
+            OpenMohaaInstalledBuild::KnownOther {
+                channel: ReleaseChannel::Preview,
+                version: validated.version,
+            }
+        );
+        fs::write(&client, b"externally replaced").expect("changed client");
+        assert!(super::validated_openmohaa_receipt(root, &client).is_none());
     }
 
     #[test]

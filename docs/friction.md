@@ -95,6 +95,10 @@ executables before Reborn activation, retains both managed copies, checks runnin
 remembers the active choice per canonical game folder.
 **Status** Shipped for Windows. Installed versions are identified only from exact package hashes
 or a receipt that still matches the files; unmatched files remain **Version unknown**.
+**Review correction, 5 Sep 2026.** Legacy OpenMoHAA `dev` receipts retain their build identity,
+and the same package installed through Preview remains current when setup selects Stable.
+Offline regression tests cover both cases; channel selection also rejects malformed semver tags
+and prevents prereleases entering Stable through a misflagged release.
 
 ### F3 · The game folder is not writable
 

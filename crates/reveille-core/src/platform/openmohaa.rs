@@ -20,16 +20,18 @@ use zip::ZipArchive;
 
 use super::package::{self as package_io, OverlayFile};
 
-// GitHub REST Releases API: /releases/latest excludes prereleases and drafts, so it is exactly
-// the stable channel. https://docs.github.com/rest/releases/releases#get-the-latest-release
+// GitHub filters by its release flags; selection also checks the tag for prerelease identifiers.
+// https://docs.github.com/rest/releases/releases#get-the-latest-release
 const STABLE_RELEASE_URL: &str =
     "https://api.github.com/repos/mohcentral/openmohaa/releases/latest";
 // The preview channel has no fixed tag: every build publishes an immutable semver prerelease tag
 // (`v0.83.0-rc.1`). The list endpoint is sorted by creation date, which lies when a hotfix is cut
 // from an older branch, so the newest entry is chosen by parsed semver precedence instead.
 // https://docs.github.com/rest/releases/releases#list-releases
-const RELEASE_LIST_URL: &str =
-    "https://api.github.com/repos/mohcentral/openmohaa/releases?per_page=30";
+const RELEASE_LIST_URL: &str = "https://api.github.com/repos/mohcentral/openmohaa/releases";
+// GitHub REST list-releases pagination: request a fixed page size and stop at a short page.
+// https://docs.github.com/rest/releases/releases#list-releases
+const RELEASES_PER_PAGE: usize = 30;
 const USER_AGENT: &str = "Reveille/0.1 (+https://github.com/mohcentral/openmohaa)";
 const MAX_RELEASE_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -166,13 +168,14 @@ impl ReleaseTarget {
     }
 }
 
-/// Release stream used for its endpoint and update identity.
+/// Release stream used to select an endpoint and eligible versions.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseChannel {
     /// Versioned release returned by GitHub's latest stable endpoint.
     Stable,
     /// Opt-in stream that takes the highest semver release, prereleases included.
+    #[serde(alias = "dev")]
     Preview,
 }
 
@@ -199,16 +202,12 @@ impl ReleaseChannel {
 
 /// Semver version parsed from a release tag, ordered by semver precedence.
 ///
-/// Build metadata (`+abc`) is parsed and discarded: semver gives it no precedence, so keeping it
-/// would make two identical versions compare unequal.
-#[derive(Clone, Debug, Serialize)]
+/// Ordering, and therefore equality, is `semver`'s: build metadata (`+abc`) carries no
+/// precedence, so `v0.83.0` and `v0.83.0+a2f3401` are the same version. The verbatim tag is kept
+/// beside it only so that what is displayed is what was published, never a reconstruction.
+#[derive(Clone, Debug)]
 pub struct ReleaseVersion {
-    major: u64,
-    minor: u64,
-    patch: u64,
-    /// Dot-separated prerelease identifiers; empty for a stable version.
-    prerelease: Vec<String>,
-    /// The tag exactly as GitHub published it, so nothing displayed is reconstructed.
+    version: semver::Version,
     tag: String,
 }
 
@@ -219,36 +218,9 @@ impl ReleaseVersion {
     /// failing, so an unrelated tag in the repository cannot break selection.
     #[must_use]
     pub fn parse(tag: &str) -> Option<Self> {
-        let rest = tag.strip_prefix('v').unwrap_or(tag);
-        let rest = rest.split('+').next()?;
-        // `Option` rather than an empty string: `v0.83.0-` has a prerelease separator and no
-        // identifiers, which semver rejects; collapsing the two would silently accept it.
-        let (core, prerelease) = match rest.split_once('-') {
-            Some((core, pre)) => (core, Some(pre)),
-            None => (rest, None),
-        };
-        let mut numbers = core.split('.');
-        let major = parse_version_number(numbers.next()?)?;
-        let minor = parse_version_number(numbers.next()?)?;
-        let patch = parse_version_number(numbers.next()?)?;
-        if numbers.next().is_some() {
-            return None;
-        }
-        let prerelease = match prerelease {
-            None => Vec::new(),
-            Some(pre) => {
-                let identifiers = pre.split('.').map(str::to_owned).collect::<Vec<String>>();
-                if identifiers.iter().any(String::is_empty) {
-                    return None;
-                }
-                identifiers
-            }
-        };
+        let version = semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()?;
         Some(Self {
-            major,
-            minor,
-            patch,
-            prerelease,
+            version,
             tag: tag.to_owned(),
         })
     }
@@ -256,7 +228,7 @@ impl ReleaseVersion {
     /// Whether this version carries a prerelease identifier such as `-rc.1`.
     #[must_use]
     pub fn is_prerelease(&self) -> bool {
-        !self.prerelease.is_empty()
+        !self.version.pre.is_empty()
     }
 
     /// The tag exactly as published.
@@ -266,8 +238,10 @@ impl ReleaseVersion {
     }
 }
 
-// Equality is semver precedence, not tag equality: `v0.83.0` and `v0.83.0+a2f3401` are the same
-// version, so deriving `PartialEq` over the verbatim tag would disagree with `Ord`.
+// Every comparison delegates to the parsed version and deliberately ignores `tag`: deriving
+// these would make the tag a tiebreaker, so `v0.83.0` and `v0.83.0+a2f3401` — the same version by
+// semver precedence — would compare unequal and order arbitrarily.
+// Equality goes through `cmp`, so it means the same thing as ordering.
 impl PartialEq for ReleaseVersion {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
@@ -278,11 +252,10 @@ impl Eq for ReleaseVersion {}
 
 impl Ord for ReleaseVersion {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.major
-            .cmp(&other.major)
-            .then_with(|| self.minor.cmp(&other.minor))
-            .then_with(|| self.patch.cmp(&other.patch))
-            .then_with(|| compare_prerelease(&self.prerelease, &other.prerelease))
+        // `cmp_precedence`, not `Ord::cmp`: `semver::Version` *derives* `Ord`, which makes build
+        // metadata a tiebreaker. The spec gives it no precedence (semver §10), so `v0.83.0` and
+        // `v0.83.0+a2f3401` must compare equal.
+        self.version.cmp_precedence(&other.version)
     }
 }
 
@@ -298,36 +271,10 @@ impl fmt::Display for ReleaseVersion {
     }
 }
 
-fn parse_version_number(value: &str) -> Option<u64> {
-    // Semver forbids leading zeroes, and accepting them would let `v1.01.0` and `v1.1.0` compare
-    // equal while displaying differently.
-    if value.is_empty() || (value.len() > 1 && value.starts_with('0')) {
-        return None;
+impl Serialize for ReleaseVersion {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.tag)
     }
-    value.parse().ok()
-}
-
-/// Semver §11.4: a version with a prerelease sorts below the same version without one, and
-/// identifiers are compared left to right, numeric below alphanumeric.
-fn compare_prerelease(left: &[String], right: &[String]) -> Ordering {
-    match (left.is_empty(), right.is_empty()) {
-        (true, true) => return Ordering::Equal,
-        (true, false) => return Ordering::Greater,
-        (false, true) => return Ordering::Less,
-        (false, false) => {}
-    }
-    for (left, right) in left.iter().zip(right) {
-        let ordering = match (left.parse::<u64>(), right.parse::<u64>()) {
-            (Ok(left), Ok(right)) => left.cmp(&right),
-            (Ok(_), Err(_)) => Ordering::Less,
-            (Err(_), Ok(_)) => Ordering::Greater,
-            (Err(_), Err(_)) => left.as_str().cmp(right.as_str()),
-        };
-        if ordering != Ordering::Equal {
-            return ordering;
-        }
-    }
-    left.len().cmp(&right.len())
 }
 
 /// Channel and host target needed to select one exact release asset.
@@ -428,8 +375,8 @@ pub struct ReleaseDownloadProgress {
 ///
 /// # Errors
 ///
-/// Returns an error for malformed JSON, a non-semver tag, a missing/ambiguous asset, or a
-/// missing/invalid published digest.
+/// Returns an error for malformed JSON, a non-semver tag, a draft or excluded prerelease,
+/// a missing/ambiguous asset, or a missing/invalid published digest.
 pub fn parse_release(
     json: &str,
     selector: ReleaseSelector,
@@ -456,6 +403,13 @@ pub fn parse_release_list(
 ) -> Result<ReleasePackage, OpenMohaaError> {
     let releases: Vec<RawRelease> =
         serde_json::from_str(json).map_err(OpenMohaaError::MalformedRelease)?;
+    select_release_list(releases, selector)
+}
+
+fn select_release_list(
+    releases: Vec<RawRelease>,
+    selector: ReleaseSelector,
+) -> Result<ReleasePackage, OpenMohaaError> {
     let newest = releases
         .into_iter()
         .filter(|release| !release.draft)
@@ -479,6 +433,10 @@ fn select_package(
 ) -> Result<ReleasePackage, OpenMohaaError> {
     let semver = ReleaseVersion::parse(&release.tag_name)
         .ok_or_else(|| OpenMohaaError::UnversionedRelease(release.tag_name.clone()))?;
+    let prerelease = semver.is_prerelease() || release.prerelease;
+    if release.draft || (prerelease && !selector.channel.admits_prereleases()) {
+        return Err(OpenMohaaError::NoSelectableRelease(selector.channel));
+    }
     let suffix = selector.target.asset_suffix();
     let mut matching_assets = release
         .assets
@@ -503,7 +461,7 @@ fn select_package(
     Ok(ReleasePackage {
         channel: selector.channel,
         version: release.tag_name,
-        prerelease: semver.is_prerelease() || release.prerelease,
+        prerelease,
         semver,
         asset_name: asset.name,
         download_url: asset.browser_download_url,
@@ -554,21 +512,43 @@ impl OpenMohaaReleaseClient {
         &self,
         selector: ReleaseSelector,
     ) -> Result<ReleasePackage, OpenMohaaError> {
-        let response = self
-            .client
-            .get(selector.channel.endpoint())
-            .header("Accept", "application/vnd.github+json")
-            .send()
+        self.release_from(selector, selector.channel.endpoint())
             .await
-            .map_err(OpenMohaaError::Network)?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(OpenMohaaError::HttpStatus(status.as_u16()));
-        }
-        let text = response.text().await.map_err(OpenMohaaError::Network)?;
-        match selector.channel {
-            ReleaseChannel::Stable => parse_release(&text, selector),
-            ReleaseChannel::Preview => parse_release_list(&text, selector),
+    }
+
+    async fn release_from(
+        &self,
+        selector: ReleaseSelector,
+        endpoint: &str,
+    ) -> Result<ReleasePackage, OpenMohaaError> {
+        let mut releases = Vec::new();
+        let mut page = 1;
+        loop {
+            let mut request = self.client.get(endpoint);
+            if selector.channel == ReleaseChannel::Preview {
+                request = request.query(&[("per_page", RELEASES_PER_PAGE), ("page", page)]);
+            }
+            let response = request
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .map_err(OpenMohaaError::Network)?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(OpenMohaaError::HttpStatus(status.as_u16()));
+            }
+            let text = response.text().await.map_err(OpenMohaaError::Network)?;
+            if selector.channel == ReleaseChannel::Stable {
+                return parse_release(&text, selector);
+            }
+            let batch: Vec<RawRelease> =
+                serde_json::from_str(&text).map_err(OpenMohaaError::MalformedRelease)?;
+            let last_page = batch.len() < RELEASES_PER_PAGE;
+            releases.extend(batch);
+            if last_page {
+                return select_release_list(releases, selector);
+            }
+            page += 1;
         }
     }
 
@@ -1160,6 +1140,156 @@ mod tests {
     }
 
     #[test]
+    fn single_release_selection_enforces_channel_and_draft_guards() {
+        let fixture = include_str!("../../tests/fixtures/openmohaa_latest_release.json");
+        for (tag, prerelease, draft) in [
+            ("v0.83.0-rc.1", false, false),
+            ("v0.83.0", true, false),
+            ("v0.83.0", false, true),
+        ] {
+            let mut release: serde_json::Value = serde_json::from_str(fixture).expect("fixture");
+            release["tag_name"] = tag.into();
+            release["prerelease"] = prerelease.into();
+            release["draft"] = draft.into();
+            let json = release.to_string();
+            assert!(matches!(
+                super::parse_release(&json, ReleaseSelector::stable(ReleaseTarget::WindowsX64)),
+                Err(OpenMohaaError::NoSelectableRelease(ReleaseChannel::Stable))
+            ));
+            let preview =
+                super::parse_release(&json, ReleaseSelector::preview(ReleaseTarget::WindowsX64));
+            if draft {
+                assert!(matches!(
+                    preview,
+                    Err(OpenMohaaError::NoSelectableRelease(_))
+                ));
+            } else {
+                assert!(preview.expect("preview candidate").prerelease);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_semver_identifiers_cannot_win_release_selection() {
+        let fixture = include_str!("../../tests/fixtures/openmohaa_latest_release.json");
+        let stable: serde_json::Value = serde_json::from_str(fixture).expect("fixture");
+        for tag in [
+            "v9.0.0-rc_1",
+            "v9.0.0-01",
+            "v9.0.0-rc..1",
+            "v9.0.0-rc.01",
+            "v9.0.0-rc.é",
+            "v9.0.0+",
+            "v9.0.0+build_1",
+            "v9.0.0+build..1",
+            "v9.0.0+build+other",
+            "v9.0.0-rc.1+bad_metadata",
+        ] {
+            assert!(ReleaseVersion::parse(tag).is_none(), "{tag}");
+            let mut invalid = stable.clone();
+            invalid["tag_name"] = tag.into();
+            invalid["assets"] = serde_json::json!([]);
+            let json = serde_json::json!([invalid, stable]).to_string();
+            for channel in [ReleaseChannel::Stable, ReleaseChannel::Preview] {
+                let package = parse_release_list(
+                    &json,
+                    ReleaseSelector {
+                        channel,
+                        target: ReleaseTarget::WindowsX64,
+                    },
+                )
+                .expect("invalid tag skipped before asset selection");
+                assert_eq!(package.version, "v0.82.1", "{tag}");
+            }
+        }
+        for tag in ["v9.0.0-0", "v9.0.0-01a", "v9.0.0-rc-1+001.build-1"] {
+            assert!(ReleaseVersion::parse(tag).is_some(), "{tag}");
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_fetches_every_page_before_selecting_a_release() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        use tokio::net::TcpListener;
+
+        let fixture = include_str!("../../tests/fixtures/openmohaa_latest_release.json");
+        let stable: serde_json::Value = serde_json::from_str(fixture).expect("fixture");
+        let mut older = stable.clone();
+        older["tag_name"] = "v0.81.0-rc.1".into();
+        older["prerelease"] = true.into();
+        let first_page =
+            serde_json::to_string(&vec![older; super::RELEASES_PER_PAGE]).expect("first page");
+        for (status, body) in [
+            ("200 OK", serde_json::json!([stable]).to_string()),
+            ("503 Service Unavailable", "{}".to_owned()),
+            ("200 OK", "invalid JSON".to_owned()),
+            ("200 OK", "[]".to_owned()),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("loopback server");
+            let endpoint = format!(
+                "http://{}/releases",
+                listener.local_addr().expect("address")
+            );
+            let responses = [("200 OK", first_page.clone()), (status, body.clone())];
+            let server = tokio::spawn(async move {
+                for (index, (status, body)) in responses.into_iter().enumerate() {
+                    let (mut stream, _) = listener.accept().await.expect("request");
+                    let mut request = Vec::new();
+                    while !request.ends_with(b"\r\n\r\n") {
+                        let mut byte = [0];
+                        stream.read_exact(&mut byte).await.expect("request header");
+                        request.push(byte[0]);
+                    }
+                    let request = String::from_utf8(request).expect("HTTP request");
+                    assert!(
+                        request.starts_with(&format!(
+                            "GET /releases?per_page=30&page={} HTTP/1.1\r\n",
+                            index + 1,
+                        )),
+                        "{request}"
+                    );
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len(),
+                    );
+                    stream
+                        .write_all(response.as_bytes())
+                        .await
+                        .expect("response");
+                }
+            });
+            let client = super::OpenMohaaReleaseClient {
+                client: reqwest::Client::builder()
+                    .no_proxy()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .build()
+                    .expect("client"),
+            };
+            let result = client
+                .release_from(
+                    ReleaseSelector::preview(ReleaseTarget::WindowsX64),
+                    &endpoint,
+                )
+                .await;
+            server.await.expect("server completed");
+            if status.starts_with("503") {
+                assert!(matches!(result, Err(OpenMohaaError::HttpStatus(503))));
+            } else if body == "invalid JSON" {
+                assert!(matches!(result, Err(OpenMohaaError::MalformedRelease(_))));
+            } else {
+                let expected = if body == "[]" {
+                    "v0.81.0-rc.1"
+                } else {
+                    "v0.82.1"
+                };
+                assert_eq!(result.expect("highest release").version, expected);
+            }
+        }
+    }
+
+    #[test]
     fn semver_precedence_orders_candidates_below_their_release() {
         let ordered = [
             "v0.82.9",
@@ -1167,6 +1297,9 @@ mod tests {
             "v0.83.0-rc.1",
             "v0.83.0-rc.2",
             "v0.83.0-rc.10",
+            "v0.83.0-rc.18446744073709551616",
+            "v0.83.0-rc.100000000000000000000",
+            "v0.83.0-rc.a",
             "v0.83.0",
             "v0.83.1",
         ]

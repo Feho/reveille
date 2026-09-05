@@ -1036,5 +1036,15 @@ channel has nothing to select until mohcentral/openmohaa publishes its first sem
 
 ## Follow-up, not blocking
 
+**Channel review correction (5 Sep 2026).** Single-release selection now rejects drafts and
+prereleases using both the tag and GitHub flag, closing the stable endpoint's bypass of H17.
+Full semver validation rejects malformed prerelease identifiers and build metadata before list
+selection. Existing `dev` receipts remain readable as Preview, and identical version/asset/digest
+packages are current across both channels while still requiring the installed client hash to
+match. Offline regressions cover these cases under H10/H17 and the setup friction in F2.
+Preview now fetches every page before selection, so maintenance candidates cannot hide a higher
+stable release on page two. A failed later page fails the check. Loopback HTTP tests cover later
+pages, failures, malformed responses and a final empty page.
+
 The PRD's BSP-checksum bullet describes that work as heavier than it proved to be. Worth
 softening once milestone 1 lands — a wording fix.
