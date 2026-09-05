@@ -7,6 +7,7 @@
 
 mod self_update;
 
+use std::cmp;
 use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::io::{self, Read as _};
@@ -34,7 +35,8 @@ use reveille_core::join::{
 use reveille_core::mapindex::{MapIndex, MapKey};
 use reveille_core::platform::openmohaa::{
     ClientActivity, OpenMohaaError, OpenMohaaReleaseClient, ReleaseChannel,
-    ReleaseDownloadProgress, ReleasePackage, ReleaseSelector, ReleaseTarget, UpdateOutcome,
+    ReleaseDownloadProgress, ReleasePackage, ReleaseSelector, ReleaseTarget, ReleaseVersion,
+    UpdateOutcome,
 };
 use reveille_core::platform::reborn::{
     self, DownloadProgress as RebornDownloadProgress, RebornClient,
@@ -291,8 +293,30 @@ enum OpenMohaaInstalledBuild {
     KnownOther {
         channel: ReleaseChannel,
         version: String,
+        relation: OfferRelation,
     },
     Unknown,
+}
+
+/// Where the offered release sits relative to the installed one, by semver precedence.
+///
+/// The interface may not call every replacement an update. The channel selector can legitimately
+/// offer a *lower* version than the one installed - a player on preview holding `v0.83.0-rc.2`
+/// who switches to stable is offered `v0.82.1` - and naming that "update" would turn a rollback
+/// into a word the player did not choose (H10, H17). A receipt written before semver tags
+/// (`Development build 2026-08-20`) has no place in that ordering and takes `Incomparable`, so the
+/// shell offers a plain install rather than inventing a direction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum OfferRelation {
+    /// The offered version outranks the installed one.
+    Newer,
+    /// The installed version outranks the offered one.
+    Older,
+    /// The same version by semver precedence, from a different release file.
+    SameVersion,
+    /// The installed version is not semver, so the two cannot be ordered.
+    Incomparable,
 }
 
 #[derive(Serialize)]
@@ -850,9 +874,18 @@ fn installed_openmohaa_build(
     {
         OpenMohaaInstalledBuild::Current
     } else {
+        let relation = match ReleaseVersion::parse(&receipt.version) {
+            Some(installed) => match installed.cmp(&selected.semver) {
+                cmp::Ordering::Less => OfferRelation::Newer,
+                cmp::Ordering::Greater => OfferRelation::Older,
+                cmp::Ordering::Equal => OfferRelation::SameVersion,
+            },
+            None => OfferRelation::Incomparable,
+        };
         OpenMohaaInstalledBuild::KnownOther {
             channel: receipt.channel,
             version: receipt.version,
+            relation,
         }
     }
 }
@@ -1799,7 +1832,7 @@ mod tests {
 
     use super::{
         AppState, BrowseFailure, BrowseFailureKind, CatalogueNonResultReason, DiscoveryError,
-        EngineChoice, MasterEndpoint, OpenMohaaFailure, OpenMohaaFailureKind,
+        EngineChoice, MasterEndpoint, OfferRelation, OpenMohaaFailure, OpenMohaaFailureKind,
         OpenMohaaInstalledBuild, QueryPort, RequestError, Server, Session, TargetGame,
         answered_for_another_game, cache_openmohaa_offer, cached_openmohaa_offer, catalogue_reason,
         installed_maps, installed_openmohaa_build, launch_refusal, merge_checked_server,
@@ -2108,6 +2141,7 @@ mod tests {
             OpenMohaaInstalledBuild::KnownOther {
                 channel: ReleaseChannel::Preview,
                 version: validated.version,
+                relation: OfferRelation::Incomparable,
             }
         );
         fs::write(&client, b"externally replaced").expect("changed client");
@@ -2161,6 +2195,7 @@ mod tests {
             OpenMohaaInstalledBuild::KnownOther {
                 channel: ReleaseChannel::Preview,
                 version: preview.version.clone(),
+                relation: OfferRelation::Older,
             }
         );
 
@@ -2170,6 +2205,54 @@ mod tests {
             installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &preview),
             OpenMohaaInstalledBuild::Unknown
         );
+    }
+
+    /// The interface takes its word for the action from this ordering, so a channel switch that
+    /// offers a lower version cannot be called an update (H10, H17).
+    #[test]
+    fn the_offered_release_is_ordered_against_the_installed_one() {
+        let temporary = TempDir::new().expect("temporary directory");
+        let root = temporary.path();
+        fs::write(root.join("openmohaa.exe"), b"installed build").expect("client fixture");
+        let installed = ReleasePackage {
+            channel: ReleaseChannel::Preview,
+            version: "v0.83.0-rc.2".to_owned(),
+            semver: ReleaseVersion::parse("v0.83.0-rc.2").expect("installed semver"),
+            prerelease: true,
+            asset_name: "openmohaa-v0.83.0-rc.2-windows-x64.zip".to_owned(),
+            download_url: "https://example.invalid/installed.zip".to_owned(),
+            size: 9,
+            digest: PublishedSha256::parse(&format!("sha256:{}", "2".repeat(64)))
+                .expect("installed digest"),
+        };
+        record_openmohaa_install(root, ReleaseTarget::WindowsX64, &installed).expect("receipt");
+
+        // A different published file every time, so the same-version case is a rebuilt release
+        // rather than the current one.
+        let offered = |tag: &str| ReleasePackage {
+            version: tag.to_owned(),
+            semver: ReleaseVersion::parse(tag).expect("offered semver"),
+            asset_name: format!("openmohaa-{tag}-windows-x64.zip"),
+            digest: PublishedSha256::parse(&format!("sha256:{}", "3".repeat(64)))
+                .expect("offered digest"),
+            ..installed.clone()
+        };
+        for (tag, relation) in [
+            ("v0.84.0-rc.1", OfferRelation::Newer),
+            ("v0.82.1", OfferRelation::Older),
+            ("v0.83.0-rc.2", OfferRelation::SameVersion),
+        ] {
+            assert_eq!(
+                installed_openmohaa_build(root, ReleaseTarget::WindowsX64, &offered(tag)),
+                OpenMohaaInstalledBuild::KnownOther {
+                    channel: ReleaseChannel::Preview,
+                    version: installed.version.clone(),
+                    relation,
+                },
+                "offering {tag} against an installed {}",
+                installed.version
+            );
+        }
     }
 
     /// The minimum of a `Server` this test needs: the two fields that identify a game endpoint,
@@ -2329,6 +2412,48 @@ mod tests {
         assert!(
             servers.contains(r#""aria-expanded": open ? "true" : "false","#),
             "ui/views/servers.js: the disclosure must publish its open state"
+        );
+    }
+
+    #[test]
+    fn an_installed_engine_can_still_be_changed_from_setup() {
+        // A text check over the shell, for the same reason as the ones above: the frontend has no
+        // test runner and this failure is silent. Both engine actions were drawn only while
+        // nothing was installed, so a player who already had OpenMoHAA could pick Preview, read
+        // the newer version off the card, press Continue to servers, and get exactly the binaries
+        // they started with — Continue records which engine to launch and installs nothing.
+        let setup = include_str!("../ui/views/setup.js");
+
+        assert!(
+            !setup.contains("!isInstalled(\"openmohaa\")")
+                && !setup.contains("!isInstalled(\"reborn\")"),
+            "ui/views/setup.js: an engine action must not be withheld merely because something is installed"
+        );
+        assert!(
+            setup.contains("view.installing === \"openmohaa\" ? installProgress(render) : available && openAction(install, status, render)"),
+            "ui/views/setup.js: the OpenMoHAA card must offer its action whenever a release is available"
+        );
+        assert!(
+            setup.contains("view.installing === \"reborn\" ? installProgress(render) : rebornAction(install, info, build, render)"),
+            "ui/views/setup.js: the Reborn card must offer its action whatever is installed"
+        );
+
+        // H10: the label states the direction the Rust comparison found, and never guesses one.
+        for wording in [
+            "if (build.relation === \"newer\") return `Update to ${version}`;",
+            "if (build.relation === \"older\") return `Go back to ${version}`;",
+            "if (build.relation === \"same_version\") return `Reinstall ${version}`;",
+        ] {
+            assert!(
+                setup.contains(wording),
+                "ui/views/setup.js: the engine action must be named from the receipt comparison — missing {wording}"
+            );
+        }
+
+        // S2: the install can legitimately write nothing, and that is not a success.
+        assert!(
+            setup.contains("if (result.outcome?.outcome === \"deferred\")"),
+            "ui/views/setup.js: a deferred install must be reported as having changed nothing"
         );
     }
 

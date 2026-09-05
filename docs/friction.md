@@ -99,6 +99,15 @@ or a receipt that still matches the files; unmatched files remain **Version unkn
 and the same package installed through Preview remains current when setup selects Stable.
 Offline regression tests cover both cases; channel selection also rejects malformed semver tags
 and prevents prereleases entering Stable through a misflagged release.
+**Observed, 5 Sep 2026.** A player who already had OpenMoHAA selected **Preview**, read
+`v0.84.0-rc.1` off the card, pressed **Continue to servers**, and found the binaries in the game
+folder unchanged. Both engine cards drew their install button only while nothing was installed,
+so the one screen that names a version offered no way to change it, and Continue — which records
+which engine to launch and installs nothing — was the only control left to press. Every card now
+offers the action its evidence line describes: **Update to v0.84.0-rc.1**, **Go back to v0.82.1**
+when a channel switch offers a lower version, **Reinstall** for a build already proved current,
+and the direction is decided by semver in Rust rather than by the shell. An install that wrote
+nothing because a program was running now says so instead of reporting success.
 
 ### F3 · The game folder is not writable
 

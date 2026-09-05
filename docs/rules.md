@@ -122,6 +122,17 @@ OpenMoHAA package identity is the exact version, asset name and digest, independ
 selected channel. Legacy `dev` receipts deserialize as `preview` and retain their recorded
 version. Tests: `identical_openmohaa_packages_are_current_across_channels` and
 `legacy_dev_receipts_keep_their_installed_build_identity`.
+**Evidence is not a reason to withhold the action.** Version evidence decides what the button is
+*called*, never whether one exists: a build that is not the offered package can always be
+replaced, and a card that states a version while offering no way to change it sends the player to
+**Continue**, which records the engine choice and installs nothing (`friction.md` F2, observed
+5 Sep 2026). `OpenMohaaInstalledBuild::KnownOther` therefore carries an `OfferRelation` decided by
+semver precedence in Rust — `newer`, `older`, `same_version`, or `incomparable` for a receipt tag
+that predates semver — and the shell names the action from it: **Update to**, **Go back to**,
+**Reinstall**, or a plain **Install**. A channel switch offering a lower version may not be called
+an update. Tests: `the_offered_release_is_ordered_against_the_installed_one` and
+`an_installed_engine_can_still_be_changed_from_setup`, the second a text check over
+`ui/views/setup.js` for the same reason as those under H12.
 
 ### H11 · Never call the measured round trip the in-game ping
 **Because** Three different numbers get the same word. The engine's ping is an average over a

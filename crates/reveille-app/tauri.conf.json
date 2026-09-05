@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Reveille",
   "mainBinaryName": "Reveille",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "identifier": "org.reveille.launcher",
   "build": {
     "frontendDist": "ui"
